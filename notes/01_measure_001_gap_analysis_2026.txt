@@ -1,0 +1,31 @@
+MEASURE 001 (M001) - EXISTING VS 2026 GAP NOTES
+
+Current software behavior (existing):
+- M001 logic exists in utils/processing.js as measure1.
+- Uses diabetes ICD + encounter CPT/HCPCS + exclusion code checks.
+- Sets ICD1, CPT1, M001.
+- Exclusion boolean condition likely flawed due to OR-over-false pattern.
+
+2026 spec expectations (from PDF):
+- Inverse measure, lower score is better.
+- Denominator: age 18-75 + diabetes diagnosis + qualifying encounter.
+- Numerator must be based on most recent HbA1c/GMI result:
+  * < 7.0 -> M1371 (Not Met)
+  * >= 7.0 and < 8.0 -> M1372 (Not Met)
+  * >= 8.0 and <= 9.0 -> M1373 (Not Met)
+  * > 9.0 -> M1211 (Met)
+  * Missing/not performed -> M1212 (Met)
+- If multiple values on same date, use lowest result.
+
+Required update direction:
+1) Keep denominator matching, refresh code lists from 2026.
+2) Correct exclusion gate logic.
+3) Add numerator bucket logic and most-recent result handling.
+4) Update exclusion coding references:
+   - Frailty includes R29.6
+   - Advanced illness uses G35.A/G35.B0/G35.B1/G35.B2/G35.C0/G35.C1/G35.C2/G35.D
+   - Legacy plain G35 reference removed in 2026 notes.
+
+Status:
+- Partial implementation exists.
+- Full 2026-compliant numerator behavior is pending.

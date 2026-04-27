@@ -1,0 +1,23 @@
+DASHBOARD VISIBILITY FINDINGS (No code changes made)
+
+Problem investigated:
+- Measures M007 and M440 were reported as "added but not showing in dashboard".
+
+Findings:
+1) Backend:
+   - app.js contains M007 -> measure7 and M440 -> measure440 mapping.
+   - processing.js contains exports.measure7 and exports.measure440.
+   => Backend implementation exists for both.
+
+2) Frontend Upload dashboard list:
+   - Upload.jsx checkboxes list does NOT include M007 and does NOT include M440.
+   => They cannot appear in Upload dashboard selection.
+
+3) Additional inconsistency:
+   - Upload.jsx includes M444 in list, but backend mapping for M444 was not found in app.js.
+
+Conclusion:
+- "Not showing" issue is caused by upload UI measure-list mismatch, not by missing backend logic for M007/M440.
+
+Next resume suggestion:
+- Sync Upload.jsx checkboxes with authoritative backend functionMapping list.

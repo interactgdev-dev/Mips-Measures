@@ -1,0 +1,22 @@
+{
+  "ignore": [
+    "temp/*",
+    "temp/**/*",
+    "output/*",
+    "output/**/*",
+    "uploads/*",
+    "uploads/**/*",
+    "*.log",
+    "*.xlsx",
+    "*.csv",
+    "*.json"
+  ],
+  "watch": [
+    "*.js",
+    "utils/*.js"
+  ],
+  "ext": "js",
+  "execMap": {
+    "js": "node --max-old-space-size=8192 --expose-gc"
+  }
+}

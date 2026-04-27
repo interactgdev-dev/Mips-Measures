@@ -1,0 +1,22 @@
+TO-BE-ADDED MEASURES CROSSCHECK (Codebase)
+
+Checked against:
+- app.js functionMapping
+- utils/processing.js exports.measureXXX
+- frontend measure lists (Upload.jsx and Calculator.jsx)
+
+Result groups:
+
+1) Fully wired (backend mapping + function present):
+- M007
+- M440
+
+2) Frontend calculation list contains them, but backend missing (mapping/function not found):
+- M243, M398, M418, M438, M441, M463, M464, M470, M488, M489, M491, M497, M499
+
+3) Completely missing in current implementation set:
+- M052
+- M277
+
+Important:
+- Backend presence alone does not guarantee upload dashboard visibility.

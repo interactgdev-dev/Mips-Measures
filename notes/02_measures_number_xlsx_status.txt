@@ -1,0 +1,20 @@
+MEASURES TRACKER SUMMARY
+Source file: c:\Measures number.xlsx
+Sheet read: "2025 vs 2026"
+
+Totals:
+- Total rows analyzed: 113
+- ALREADY ADDED: 87
+- TO BE ADDED: 17
+- NOT AVAILABLE THIS YEAR: 9
+
+TO BE ADDED list:
+M007, M052, M243, M277, M398, M418, M438, M440, M441, M463, M464, M470, M488, M489, M491, M497, M499
+
+NOT AVAILABLE THIS YEAR (from tracker):
+M185, M290, M322, M389, M419, M424, M443, M487, M493
+
+Special notes from tracker rows:
+- M007: added but not showing in dashboard
+- M440: added but not showing in dashboard
+- M039: note says apply only CPT based

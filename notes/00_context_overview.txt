@@ -1,0 +1,25 @@
+PROJECT CONTEXT (Saved for resume)
+Date: 2026-04-24
+
+Scope discussed:
+- 2026 CQM release updates vs existing software implementation.
+- Focus on ICD/CPT changes, numerator behavior, exclusions, and dashboard visibility.
+- Code edits were intentionally avoided during analysis phase.
+
+Primary source documents reviewed:
+1) 2026 CQM Release Notes (user-shared text)
+2) 2026 Measure 001 PDF:
+   c:\Users\Waqas Rafique\AppData\Roaming\Cursor\User\workspaceStorage\4a29015f5f2da46b5d9e84f9bea789fe\pdfs\6c97f023-7c05-485f-95f8-35a6af61937f\2026_Measure_001_MIPSCQM.pdf
+3) Measures tracker workbook:
+   c:\Measures number.xlsx
+
+Code areas analyzed:
+- app.js (function mapping, selection flow, export logic)
+- utils/processing.js (measure implementations)
+- frontend/src/components/Upload.jsx (upload dashboard measure list)
+- frontend/src/components/Calculator.jsx (feedback/calculation measure list)
+
+High-level conclusion:
+- Many measures are implemented, but 2026 compliance requires targeted updates.
+- M001 has major numerator-model differences vs 2026 spec.
+- Dashboard list mismatch exists (some measures implemented backend but missing in upload UI list).
