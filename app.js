@@ -9,7 +9,8 @@ const debugError = require("debug")("app:error");
 let limit;
 (async () => {
   const pLimit = (await import("p-limit")).default;
-  limit = pLimit(50); // Increased to 50 for faster parallel processing of large files (was 20)
+  // Keep concurrency moderate to avoid Mongo socket resets under heavy parallel writes.
+  limit = pLimit(15);
 })();
 
 const csv = require("csv-parser");
@@ -185,7 +186,6 @@ let functionMapping = {
   M006: "measure6",
   M007: "measure7",
   M008: "measure8",
-  M019: "measure19",
   M024: "measure24",
   M039: "measure39",
   M047: "measure47",
@@ -337,6 +337,9 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     // Process and track timing
     const startTime = Date.now();
     const result = await processUploadedFile(file.path, fileName, columns, res, jobId, selectedMeasures);
+    if (result?.error) {
+      throw result.error;
+    }
     dbConnection = result.dbConnection; // Store connection reference
     const endTime = Date.now();
     const processingTime = ((endTime - startTime) / 1000).toFixed(2);
@@ -536,7 +539,7 @@ async function processUploadedFile(filePath, fileName, columns, res, jobId = nul
     if (!res.headersSent) {
       res.status(500).json({ message: "Error processing file" });
     }
-    return { dbConnection };
+    return { dbConnection, error };
   }
 }
 
@@ -598,8 +601,8 @@ async function connectToDatabase(database_name) {
   const dbConnection = mongoose.createConnection(
     `mongodb://127.0.0.1:27017/${database_name}`,
     {
-      maxPoolSize: 50, // Increased from 10 to 50 for better concurrency
-      minPoolSize: 5,  // Increased from 2 to 5
+      maxPoolSize: 20,
+      minPoolSize: 2,
       socketTimeoutMS: 0, // No timeout for long-running operations
       serverSelectionTimeoutMS: 60000, // 60s to initially connect (was 30s)
       connectTimeoutMS: 60000, // 60s connection timeout
@@ -688,24 +691,32 @@ async function processRecordsInChunks(collection, cursor, columns, onBatchProces
 }
 
 async function processBatch(collection, batch, batchCount, columns) {
-  try {
-    // ALWAYS run all measure functions to populate Sheet1 with complete data
-    // Excel filtering happens later based on selectedMeasures
-    const selectedFunctions = Object.values(functionMapping);
-
-    if (!selectedFunctions.length) {
-      return;
-    }
-    // Run measure functions with limited concurrency to avoid memory spikes on large files
-    await Promise.all(
+  // ALWAYS run all measure functions to populate Sheet1 with complete data
+  // Excel filtering happens later based on selectedMeasures
+  const selectedFunctions = Object.values(functionMapping);
+  if (!selectedFunctions.length) {
+    return;
+  }
+  const runAllMeasures = async () =>
+    Promise.all(
       selectedFunctions.map((funcName) => {
         if (typeof Measures[funcName] === "function") {
           return limit(() => Measures[funcName](collection, batch));
         }
       })
     );
+  try {
+    await runAllMeasures();
   } catch (err) {
-    // Optionally handle error, but do not log
+    const transient = ["ECONNRESET", "ETIMEDOUT", "MongoNetworkError", "PoolClearedError"].some((token) =>
+      String(err?.code || err?.name || err?.message || "").includes(token)
+    );
+    if (transient) {
+      console.warn(`Batch ${batchCount} transient DB error, retrying once: ${err.message}`);
+      await runAllMeasures();
+      return;
+    }
+    throw err;
   }
 }
 

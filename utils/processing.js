@@ -1,4 +1,4 @@
-// Updated Measure 143 implementation
+﻿// Updated Measure 143 implementation
 exports.measure143 = async (collection, records) => {
   const icdCodesToCompare143C1 = [
       "C000","C001","C002","C003","C004","C005","C006","C008","C009","C01",
@@ -660,7 +660,7 @@ exports.measure1 = async (collection, records) => {
 "E103551", "E103552", "E103553", "E103559", "E103591", "E103592", "E103593", "E103599", "E1036", "E1037X1", 
   "E1037X2", "E1037X3", "E1037X9", "E1039", "E1040", "E1041", "E1042", "E1043", "E1044", "E1049", "E1051", "E1052", 
   "E1059", "E10610", "E10618", "E10620", "E10621", "E10622", "E10628", "E10630", "E10638", "E10641", "E10649", 
-  "E1065", "E1069", "E108", "E109", "E1100", "E1101", "E1121", "E1122", "E1129", "E11311", "E11319", "E113211", 
+  "E1065", "E1069", "E108", "E109", "E1100", "E1101", "E1110", "E1111", "E1121", "E1122", "E1129", "E11311", "E11319", "E113211", 
   "E113212", "E113213", "E113219", "E113291", "E113292", "E113293", "E113299", "E113311", "E113312", "E113313", 
   "E113319", "E113391", "E113392", "E113393", "E113399", "E113411", "E113412", "E113413", "E113419", "E113491", 
   "E113492", "E113493", "E113499", "E113511", "E113512", "E113513", "E113519", "E113521", "E113522", "E113523", 
@@ -687,119 +687,30 @@ exports.measure1 = async (collection, records) => {
   "99348", "99349", "99350", "99385", "99386", "99387", "99395", "99396", "99397", "G0270", "G0271", "G0402", "G0438", 
   "G0439"
   ];
+  const denominatorExclusionCodes1 = ["G9687", "G9988"];
+  const denominatorExclusionCodes66Plus1 = ["G2081", "G2090", "G2091"];
   
-  const qdcPriority = ["M1371", "M1372", "M1373", "M1211", "M1212"];
-  const qdcSet = new Set(qdcPriority);
-  const toNumericDos = (dosValue) => {
-    if (typeof dosValue === "number" && Number.isFinite(dosValue)) return dosValue;
-    if (typeof dosValue === "string" && dosValue.trim() !== "") {
-      const parsed = Number(dosValue.trim());
-      if (!Number.isNaN(parsed)) return parsed;
-      const parsedDate = new Date(dosValue);
-      if (!Number.isNaN(parsedDate.getTime())) return parsedDate.getTime();
-    }
-    return -Infinity;
-  };
-
-  const getPatientKey = (record) => {
-    const raw =
-      record["PAT ID"] ??
-      record["PATID"] ??
-      record["PATIENT ID"] ??
-      record["Patient ID"] ??
-      record["MRN"] ??
-      record["MEMBER ID"] ??
-      record["Member ID"] ??
-      record["PATIENT"];
-    return raw === undefined || raw === null ? String(record._id) : String(raw);
-  };
-
-  const patientState = new Map();
-
-  for (const record of records) {
-    const patientKey = getPatientKey(record);
+  await bulkUpdateRecords(collection, records, (record) => {
     const icdCodes1 = String(record.ICD || "").split(" ");
     const cptCodes1 = String(record.CPT || "").split(" ");
+    const age = Number(record.AGE);
+    const inAgeRange = age >= 18 && age <= 75;
 
-    const inAgeRange = record.AGE >= 18 && record.AGE <= 75;
-    const isSenior = record.AGE >= 66;
-
-    const icdMatched1 = icdCodes1.filter(
-      (code) => icdCodesToCompare1.includes(code) && inAgeRange
-    );
-    const cptMatched1 = cptCodes1.filter(
-      (code) => cptCodesToCompare1.includes(code) && inAgeRange
-    );
-
-    const denominatorMetOnRecord = icdMatched1.length > 0 && cptMatched1.length > 0;
-    const denominatorExcludedOnRecord =
-      (cptCodes1.includes("G9687") && inAgeRange) ||
-      (cptCodes1.includes("G9988") && inAgeRange) ||
-      (cptCodes1.includes("G2081") && isSenior) ||
-      (cptCodes1.includes("G2090") && isSenior) ||
-      (cptCodes1.includes("G2091") && isSenior);
-
-    const qdcsOnRecord = cptCodes1.filter((code) => qdcSet.has(code));
-
-    if (!patientState.has(patientKey)) {
-      patientState.set(patientKey, {
-        denominatorMet: false,
-        denominatorExcluded: false,
-        icdEvidence: false,
-        cptEvidence: false,
-        latestQdcDos: -Infinity,
-        latestDateQdcs: [],
-      });
-    }
-
-    const state = patientState.get(patientKey);
-    state.denominatorMet = state.denominatorMet || denominatorMetOnRecord;
-    state.denominatorExcluded = state.denominatorExcluded || denominatorExcludedOnRecord;
-    state.icdEvidence = state.icdEvidence || icdMatched1.length > 0;
-    state.cptEvidence = state.cptEvidence || cptMatched1.length > 0;
-
-    if (qdcsOnRecord.length > 0) {
-      const dosNumeric = toNumericDos(record.DOS);
-      if (dosNumeric > state.latestQdcDos) {
-        state.latestQdcDos = dosNumeric;
-        state.latestDateQdcs = [...qdcsOnRecord];
-      } else if (dosNumeric === state.latestQdcDos) {
-        state.latestDateQdcs.push(...qdcsOnRecord);
-      }
-    }
-  }
-
-  const pickQdcFromLatestDate = (state) => {
-    for (const qdc of qdcPriority) {
-      if (state.latestDateQdcs.includes(qdc)) return qdc;
-    }
-    return "";
-  };
-
-  await bulkUpdateRecords(collection, records, (record) => {
-    const patientKey = getPatientKey(record);
-    const state = patientState.get(patientKey);
-    if (!state) return null;
-
-    const measureEligible = state.denominatorMet && !state.denominatorExcluded;
-    // 2026: choose the most recent glycemic status assessment (patient-level),
-    // and when multiple assessments occur on the same date, use the lowest result.
-    let selectedQdc = pickQdcFromLatestDate(state);
-    if (measureEligible && !selectedQdc) {
-      selectedQdc = "M1212";
-    }
-
-    const numeratorPerformanceMet = selectedQdc === "M1211" || selectedQdc === "M1212";
-    const numeratorPerformanceNotMet =
-      selectedQdc === "M1371" || selectedQdc === "M1372" || selectedQdc === "M1373";
+    const icdMatched1 = icdCodes1.filter((code) => icdCodesToCompare1.includes(code) && inAgeRange);
+    const cptMatched1 = cptCodes1.filter((code) => cptCodesToCompare1.includes(code) && inAgeRange);
+    const hasExclusionAnyAge = cptCodes1.some((code) => denominatorExclusionCodes1.includes(code));
+    const hasExclusion66Plus =
+      age >= 66 && cptCodes1.some((code) => denominatorExclusionCodes66Plus1.includes(code));
+    const denominatorExcluded = hasExclusionAnyAge || hasExclusion66Plus;
+    const measureEligible = icdMatched1.length > 0 && cptMatched1.length > 0 && !denominatorExcluded;
 
     return {
-      ICD1: state.icdEvidence ? 1 : 0,
-      CPT1: state.cptEvidence ? 1 : 0,
+      ICD1: icdMatched1.length > 0 ? 1 : 0,
+      CPT1: cptMatched1.length > 0 ? 1 : 0,
       E001: measureEligible ? 0 : 1,
-      N001_MET: measureEligible && numeratorPerformanceMet ? 1 : 0,
-      N001_NOT_MET: measureEligible && numeratorPerformanceNotMet ? 1 : 0,
-      QDC001: selectedQdc || "",
+      N001_MET: 0,
+      N001_NOT_MET: 0,
+      QDC001: "",
       M001: measureEligible ? 1 : 0,
     };
   });
@@ -824,105 +735,36 @@ exports.measure5 = async (collection, records) => {
     "99348", "99349", "99350", "99424", "99426"
   ];
   const dischargeEncounterCodes = ["99238", "99239"];
-  const qdcPriority = ["G2092", "G2093", "G2094", "G2096"];
-
-  const getPatientKey = (record) => {
-    const raw =
-      record["PAT ID"] ??
-      record["PATID"] ??
-      record["PATIENT ID"] ??
-      record["Patient ID"] ??
-      record["MRN"] ??
-      record["MEMBER ID"] ??
-      record["Member ID"] ??
-      record["PATIENT"];
-    return raw === undefined || raw === null ? String(record._id) : String(raw);
-  };
-
-  const hasToken = (record, token) => {
-    const codeString = `${record.CPT || ""} ${record.ICD || ""} ${record.MOD || ""}`;
-    return codeString.split(" ").includes(token);
-  };
-
-  const patientState = new Map();
-
-  for (const record of records) {
-    const patientKey = getPatientKey(record);
-    if (!patientState.has(patientKey)) {
-      patientState.set(patientKey, {
-        hasHeartFailureDx: false,
-        outpatientEncounters: 0,
-        hasLvefLE40: false,
-        hasTransplantOrLvad: false,
-      });
-    }
-    const state = patientState.get(patientKey);
-
+  await bulkUpdateRecords(collection, records, (record) => {
     const icdCodes = String(record.ICD || "").split(" ");
     const cptCodes = String(record.CPT || "").split(" ");
     const inAgeRange = Number(record.AGE) >= 18;
-
-    const hasHeartFailureDxOnRecord =
-      inAgeRange && icdCodes.some((code) => hfIcdCodes.includes(code));
-    const hasOutpatientEncounter =
-      inAgeRange && cptCodes.some((code) => outpatientEncounterCodes.includes(code));
-
-    state.hasHeartFailureDx = state.hasHeartFailureDx || hasHeartFailureDxOnRecord;
-    if (hasOutpatientEncounter) state.outpatientEncounters += 1;
-    state.hasLvefLE40 = state.hasLvefLE40 || hasToken(record, "M1150");
-    state.hasTransplantOrLvad = state.hasTransplantOrLvad || hasToken(record, "M1151");
-  }
-
-  await bulkUpdateRecords(collection, records, (record) => {
-    const patientKey = getPatientKey(record);
-    const state = patientState.get(patientKey);
-    if (!state) return null;
-
-    const cptCodes = String(record.CPT || "").split(" ");
-    const inAgeRange = Number(record.AGE) >= 18;
-    const hasTelehealthForC2 = hasToken(record, "M1426");
+    const hasHeartFailureDx = inAgeRange && icdCodes.some((code) => hfIcdCodes.includes(code));
+    const hasOutpatientEncounter = inAgeRange && cptCodes.some((code) => outpatientEncounterCodes.includes(code));
     const hasDischargeEncounter =
       inAgeRange && cptCodes.some((code) => dischargeEncounterCodes.includes(code));
-
+    const hasLvefLe40 = cptCodes.includes("M1150");
+    const denominatorExcluded = cptCodes.includes("M1151");
+    const telehealthForDischarge = cptCodes.includes("M1426");
     const criteria1Eligible =
-      inAgeRange &&
-      state.hasHeartFailureDx &&
-      state.outpatientEncounters >= 2 &&
-      state.hasLvefLE40 &&
-      !state.hasTransplantOrLvad;
-
+      hasHeartFailureDx && hasOutpatientEncounter && hasLvefLe40 && !denominatorExcluded;
     const criteria2Eligible =
-      inAgeRange &&
-      state.hasHeartFailureDx &&
+      hasHeartFailureDx &&
       hasDischargeEncounter &&
-      !hasTelehealthForC2 &&
-      state.hasLvefLE40 &&
-      !state.hasTransplantOrLvad;
-
+      !telehealthForDischarge &&
+      hasLvefLe40 &&
+      !denominatorExcluded;
     const measureEligible = criteria1Eligible || criteria2Eligible;
-
-    let selectedQdc = "";
-    for (const qdc of qdcPriority) {
-      if (hasToken(record, qdc)) {
-        selectedQdc = qdc;
-        break;
-      }
-    }
-
-    const numeratorMet = selectedQdc === "G2092";
-    const denominatorException = selectedQdc === "G2093" || selectedQdc === "G2094";
-    const numeratorNotMet = selectedQdc === "G2096";
-
     return {
-      ICD5C1: state.hasHeartFailureDx ? 1 : 0,
-      CPT5C1: state.outpatientEncounters >= 2 ? 1 : 0,
-      ICD5C2: state.hasHeartFailureDx ? 1 : 0,
+      ICD5C1: hasHeartFailureDx ? 1 : 0,
+      CPT5C1: hasOutpatientEncounter ? 1 : 0,
+      ICD5C2: hasHeartFailureDx ? 1 : 0,
       CPT5C2: hasDischargeEncounter ? 1 : 0,
       E005: measureEligible ? 0 : 1,
-      N005_MET: measureEligible && numeratorMet ? 1 : 0,
-      N005_EXCEPTION: measureEligible && denominatorException ? 1 : 0,
-      N005_NOT_MET: measureEligible && numeratorNotMet ? 1 : 0,
-      QDC005: selectedQdc || "",
+      N005_MET: 0,
+      N005_EXCEPTION: 0,
+      N005_NOT_MET: 0,
+      QDC005: "",
       M005: measureEligible ? 1 : 0,
     };
   });
@@ -955,11 +797,11 @@ exports.measure6 = async (collection, records) => {
     "I2489",
     "I249",
     "I2510",
-    "I251110",
-    "I251111",
-    "I251112",
-    "I251118",
-    "I251119",
+    "I25110",
+    "I25111",
+    "I25112",
+    "I25118",
+    "I25119",
     "I252",
     "I255",
     "I256",
@@ -1011,6 +853,23 @@ exports.measure6 = async (collection, records) => {
     "Z9861",
   ];
   const cptCodesToCompare6 = [
+    "98000",
+    "98001",
+    "98002",
+    "98003",
+    "98004",
+    "98005",
+    "98006",
+    "98007",
+    "98008",
+    "98009",
+    "98010",
+    "98011",
+    "98012",
+    "98013",
+    "98014",
+    "98015",
+    "98016",
     "99202",
     "99203",
     "99204",
@@ -1044,93 +903,26 @@ exports.measure6 = async (collection, records) => {
     "99426",
   ];
 
-  const qdcPriority = ["4086F", "4086F1P", "4086F2P", "4086F8P"];
-
-  const getPatientKey = (record) => {
-    const raw =
-      record["PAT ID"] ??
-      record["PATID"] ??
-      record["PATIENT ID"] ??
-      record["Patient ID"] ??
-      record["MRN"] ??
-      record["MEMBER ID"] ??
-      record["Member ID"] ??
-      record["PATIENT"];
-    return raw === undefined || raw === null ? String(record._id) : String(raw);
-  };
-
-  const extractQdcFromRecord = (record) => {
-    const cptCodes = String(record.CPT || "").split(" ");
-    const modCodes = String(record.MOD || "").split(" ");
-
-    if (cptCodes.includes("4086F")) {
-      if (modCodes.includes("1P")) return "4086F1P";
-      if (modCodes.includes("2P")) return "4086F2P";
-      if (modCodes.includes("8P")) return "4086F8P";
-      return "4086F";
-    }
-    if (cptCodes.includes("4086F1P")) return "4086F1P";
-    if (cptCodes.includes("4086F2P")) return "4086F2P";
-    if (cptCodes.includes("4086F8P")) return "4086F8P";
-    return "";
-  };
-
-  const patientState = new Map();
-  for (const record of records) {
-    const patientKey = getPatientKey(record);
-    if (!patientState.has(patientKey)) {
-      patientState.set(patientKey, {
-        denominatorMet: false,
-        hasIcdEvidence: false,
-        hasCptEvidence: false,
-        selectedQdc: "",
-      });
-    }
-    const state = patientState.get(patientKey);
-
-    const icdCodes6 = String(record.ICD || "").split(" ");
-    const cptCodes6 = String(record.CPT || "").split(" ");
-    const inAgeRange = Number(record.AGE) >= 18;
-
-    const hasIcd = inAgeRange && icdCodes6.some((code) => icdCodesToCompare6.includes(code));
-    const hasEncounter = inAgeRange && cptCodes6.some((code) => cptCodesToCompare6.includes(code));
-
-    state.hasIcdEvidence = state.hasIcdEvidence || hasIcd;
-    state.hasCptEvidence = state.hasCptEvidence || hasEncounter;
-    state.denominatorMet = state.denominatorMet || (hasIcd && hasEncounter);
-
-    const qdc = extractQdcFromRecord(record);
-    if (qdc) {
-      if (!state.selectedQdc) {
-        state.selectedQdc = qdc;
-      } else {
-        const currentPriority = qdcPriority.indexOf(state.selectedQdc);
-        const candidatePriority = qdcPriority.indexOf(qdc);
-        if (candidatePriority !== -1 && (currentPriority === -1 || candidatePriority < currentPriority)) {
-          state.selectedQdc = qdc;
-        }
-      }
-    }
-  }
+  const denominatorExclusionCodes6 = [];
 
   await bulkUpdateRecords(collection, records, (record) => {
-    const state = patientState.get(getPatientKey(record));
-    if (!state) return null;
-
-    const denominatorMet = state.denominatorMet;
-    const selectedQdc = state.selectedQdc;
-    const numeratorMet = selectedQdc === "4086F";
-    const denominatorException = selectedQdc === "4086F1P" || selectedQdc === "4086F2P";
-    const numeratorNotMet = selectedQdc === "4086F8P";
+    const icdCodes6 = String(record.ICD || "").split(" ");
+    const cptCodes6 = String(record.CPT || "").split(" ");
+    const modCodes = String(record.MOD || "").split(" ");
+    const inAgeRange = Number(record.AGE) >= 18;
+    const hasIcd = inAgeRange && icdCodes6.some((code) => icdCodesToCompare6.includes(code));
+    const hasEncounter = inAgeRange && cptCodes6.some((code) => cptCodesToCompare6.includes(code));
+    const denominatorExcluded = cptCodes6.some((code) => denominatorExclusionCodes6.includes(code));
+    const denominatorMet = hasIcd && hasEncounter && !denominatorExcluded;
 
     return {
-      ICD6: state.hasIcdEvidence ? 1 : 0,
-      CPT6: state.hasCptEvidence ? 1 : 0,
+      ICD6: hasIcd ? 1 : 0,
+      CPT6: hasEncounter ? 1 : 0,
       E006: denominatorMet ? 0 : 1,
-      N006_MET: denominatorMet && numeratorMet ? 1 : 0,
-      N006_EXCEPTION: denominatorMet && denominatorException ? 1 : 0,
-      N006_NOT_MET: denominatorMet && numeratorNotMet ? 1 : 0,
-      QDC006: selectedQdc || "",
+      N006_MET: 0,
+      N006_EXCEPTION: 0,
+      N006_NOT_MET: 0,
+      QDC006: "",
       M006: denominatorMet ? 1 : 0,
     };
   });
@@ -1142,188 +934,73 @@ exports.measure6 = async (collection, records) => {
 };
 
 exports.measure7 = async (collection, records) => {
-  const icdCodesToCompare7C1 = [
-    "I200", "I201", "I202", "I2089", "I209", "I240", "I2489", "I249", "I2510", 
-  "I25110", "I25111", "I25112", "I25118", "I25119", "I255", "I256", "I25700", 
-  "I25701", "I25702", "I25708", "I25709", "I25710", "I25711", "I25712", "I25718", 
-  "I25719", "I25720", "I25721", "I25722", "I25728", "I25729", "I25730", "I25731", 
-  "I25732", "I25738", "I25739", "I25750", "I25751", "I25752", "I25758", "I25759", 
-  "I25760", "I25761", "I25762", "I25768", "I25769", "I25790", "I25791", "I25792", 
-  "I25798", "I25799", "I25810", "I25811", "I25812", "I2582", "I2583", "I2584", 
-  "I2589", "I259", "Z951", "Z955", "Z9861"
+  const cadIcdCodes = [
+    "I200", "I201", "I202", "I2081", "I2089", "I209", "I240", "I2489", "I249", "I2510",
+    "I25110", "I25111", "I25112", "I25118", "I25119", "I255", "I256", "I25700", "I25701",
+    "I25702", "I25708", "I25709", "I25710", "I25711", "I25712", "I25718", "I25719", "I25720",
+    "I25721", "I25722", "I25728", "I25729", "I25730", "I25731", "I25732", "I25738", "I25739",
+    "I25750", "I25751", "I25752", "I25758", "I25759", "I25760", "I25761", "I25762", "I25768",
+    "I25769", "I25790", "I25791", "I25792", "I25798", "I25799", "I25810", "I25811", "I25812",
+    "I2582", "I2583", "I2584", "I2589", "I259", "Z951", "Z955", "Z9861"
   ];
-
-  const cptCodesToCompare7C11 = [
-    "33140", "33510", "33511", "33512", "33513", "33514", "33516", "33533", "33534", 
-  "33535", "33536", "92920", "92924", "92928", "92933", "92937", "92941", "92943"
+  const cardiacSurgeryCodes = [
+    "33140", "33510", "33511", "33512", "33513", "33514", "33516", "33533", "33534",
+    "33535", "33536", "92920", "92924", "92928", "92930", "92933", "92937", "92941", "92943", "92945"
   ];
-
-  const cptCodesToCompare7C12 = [
-    "99202", "99203", "99204", "99205", "99212", "99213", "99214", "99215", "99242", 
-  "99243", "99244", "99245", "99304", "99305", "99306", "99307", "99308", "99309", 
-  "99310", "99315", "99316", "99341", "99342", "99344", "99345", "99347", "99348", 
-  "99349", "99350", "99424", "99426"
+  const encounterCodes = [
+    "98000", "98001", "98002", "98003", "98004", "98005", "98006", "98007", "98008", "98009",
+    "98010", "98011", "98012", "98013", "98014", "98015", "98016", "99202", "99203", "99204",
+    "99205", "99212", "99213", "99214", "99215", "99242", "99243", "99244", "99245", "99304",
+    "99305", "99306", "99307", "99308", "99309", "99310", "99315", "99316", "99341", "99342",
+    "99344", "99345", "99347", "99348", "99349", "99350", "99424", "99426"
   ];
+  const miIcdCodes = ["I2101", "I2102", "I2109", "I2111", "I2119", "I2121", "I2129", "I213", "I214", "I219", "I21A9", "I21B"];
+  const denominatorExclusionCodes7 = [];
 
-const cptCodesToCompare7C13 = [
- "99202", "99203", "99204", "99205", "99212", "99213", "99214", "99215", "99242", 
-  "99243", "99244", "99245", "99304", "99305", "99306", "99307", "99308", "99309", 
-  "99310", "99315", "99316", "99341", "99342", "99344", "99345", "99347", "99348", 
-  "99349", "99350", "99424", "99426"
-      ];
+  const splitCodes = (value) => String(value || "").trim().split(/\s+/).filter(Boolean);
+  const normalizeCode = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 
+  await bulkUpdateRecords(collection, records, (record) => {
+    const icdCodes = splitCodes(record.ICD).map((code) => normalizeCode(code));
+    const cptCodes = splitCodes(record.CPT).map((code) => normalizeCode(code));
+    const inAgeRange = Number(record.AGE) >= 18;
 
-  const icdCodesToCompare7C21 = [
-      "I200", "I201", "I202", "I2089", "I209", "I240", "I2489", "I249", "I2510", 
-  "I25110", "I25111", "I25112", "I25118", "I25119", "I255", "I256", "I25700", 
-  "I25701", "I25702", "I25708", "I25709", "I25710", "I25711", "I25712", "I25718", 
-  "I25719", "I25720", "I25721", "I25722", "I25728", "I25729", "I25730", "I25731", 
-  "I25732", "I25738", "I25739", "I25750", "I25751", "I25752", "I25758", "I25759", 
-  "I25760", "I25761", "I25762", "I25768", "I25769", "I25790", "I25791", "I25792", 
-  "I25798", "I25799", "I25810", "I25811", "I25812", "I2582", "I2583", "I2584", 
-  "I2589", "I259", "Z951", "Z955", "Z9861"
-  ];
+    const hasCad = icdCodes.some((code) => cadIcdCodes.includes(code));
+    const hasCardiacSurgeryProxy = cptCodes.some((code) => cardiacSurgeryCodes.includes(code));
+    const hasCadOrProxy = inAgeRange && (hasCad || hasCardiacSurgeryProxy);
+    const hasEncounter = inAgeRange && cptCodes.some((code) => encounterCodes.includes(code));
+    const hasPriorMi = icdCodes.some((code) => miIcdCodes.includes(code));
 
-  const icdCodesToCompare7C22 = [
-   "I2101", "I2102", "I2109", "I2111", "I2119", "I2121", "I2129", "I213", 
-  "I214", "I219", "I21A9"
-  ];
+    // Per request: don't enforce M/G code in AND criteria for denominator.
+    const denominatorExcluded = cptCodes.some((code) => denominatorExclusionCodes7.includes(code));
+    const criteria1Eligible = hasCadOrProxy && hasEncounter && !denominatorExcluded;
+    const criteria2Eligible = hasCadOrProxy && hasEncounter && hasPriorMi && !denominatorExcluded;
+    const measureEligible = criteria1Eligible || criteria2Eligible;
 
-  const cptCodesToCompare7C21 = [
-   "33140", "33510", "33511", "33512", "33513", "33514", "33516", "33533", "33534", 
-  "33535", "33536", "92920", "92924", "92928", "92933", "92937", "92941", "92943"
-  ];
-
-  const cptCodesToCompare7C22 = [
-     "99202", "99203", "99204", "99205", "99212", "99213", "99214", "99215", "99242", 
-  "99243", "99244", "99245", "99304", "99305", "99306", "99307", "99308", "99309", 
-  "99310", "99315", "99316", "99341", "99342", "99344", "99345", "99347", "99348", 
-  "99349", "99350", "99424", "99426"
-  ];
-
-const cptCodesToCompare7C23 = [
-     "99202", "99203", "99204", "99205", "99212", "99213", "99214", "99215", "99242", 
-  "99243", "99244", "99245", "99304", "99305", "99306", "99307", "99308", "99309", 
-  "99310", "99315", "99316", "99341", "99342", "99344", "99345", "99347", "99348", 
-  "99349", "99350", "99424", "99426"
-  ];
-
-
-await bulkUpdateRecords(collection, records, (record) => {
-const icdCodes7C1 = (record.ICD || "").split(" ");
-  const icdCodes7C21 = (record.ICD || "").split(" ");
-  const icdCodes7C22 = (record.ICD || "").split(" ");
-  const cptCodes7C11 = String(record.CPT || "").split(" ");
-  const cptCodes7C12 = String(record.CPT || "").split(" ");
-  const cptCodes7C13 = String(record.CPT || "").split(" ");
-  const cptCodes7C14 = String(record.CPT || "").split(" ");
-  const cptCodes7C21 = String(record.CPT || "").split(" ");
-  const cptCodes7C22 = String(record.CPT || "").split(" ");
- const cptCodes7C23 = String(record.CPT || "").split(" ");
-  
-
-
-  const icdMatched7C1 = icdCodes7C1.filter(
-    (code) =>
-      icdCodesToCompare7C1.includes(code) &&
-      record.AGE >= 18 
-  );
-
-  const icdMatched7C21 = icdCodes7C21.filter(
-    (code) =>
-      icdCodesToCompare7C21.includes(code) &&
-      record.AGE >= 18 
-  );
-
-  const icdMatched7C22 = icdCodes7C22.filter(
-    (code) =>
-      icdCodesToCompare7C22.includes(code) &&
-      record.AGE >= 18 
-  );
-
-  const cptMatched7C11 = cptCodes7C11.filter(
-    (code) =>
-      cptCodesToCompare7C11.includes(code) &&
-      record.AGE >= 18 
-  );
-
-  const cptMatched7C12 = cptCodes7C12.filter(
-    (code) =>
-      cptCodesToCompare7C12.includes(code) &&
-      record.AGE >= 18 
-  );
-
-  const cptMatched7C13 = cptCodes7C13.filter(
-    (code) =>
-      cptCodesToCompare7C13.includes(code) &&
-      record.AGE >= 18 
-  );
-
-  const cptMatched7C14 = cptCodes7C14.includes("G8694") && record.AGE >= 18;
-
-  const cptMatched7C21 = cptCodes7C21.filter(
-    (code) =>
-      cptCodesToCompare7C21.includes(code) &&
-      record.AGE >= 18 
-  );
-
-  const cptMatched7C22 = cptCodes7C22.filter(
-    (code) =>
-      cptCodesToCompare7C22.includes(code) &&
-      record.AGE >= 18 
-  );
-
-const cptMatched7C23 = cptCodes7C23.filter(
-    (code) =>
-      cptCodesToCompare7C23.includes(code) &&
-      record.AGE >= 18 
-  );
-
-
-  const updateData = {
-    ICD7C1: icdMatched7C1.length > 0 ? 1 : 0,
-    CPT7C11: cptMatched7C11.length > 0 ? 1 : 0,
-    CPT7C12: cptMatched7C12.length > 0 ? 1 : 0,
-    CPT7C13: cptMatched7C12.length > 0 ? 1 : 0,
-    ICD7C21: icdMatched7C21.length > 0 ? 1 : 0,
-    ICD7C22: icdMatched7C22.length > 0 ? 1 : 0,
-    CPT7C21: cptMatched7C21.length > 0 ? 1 : 0,
-    CPT7C22: cptMatched7C22.length > 0 ? 1 : 0,
-    CPT7C23: cptMatched7C22.length > 0 ? 1 : 0,
-
-    M007:
-      ((icdMatched7C1.length > 0 || cptMatched7C11.length > 0) &&
-        cptMatched7C12.length > 0 && 
-	cptMatched7C13.length > 0) ||
-	((icdMatched7C21.length > 0 || cptMatched7C21.length > 0) &&
-        icdMatched7C22.length > 0 &&
-        cptMatched7C22.length > 0 &&
-        cptMatched7C23.length > 0)
-        ? 1
-        : 0,
-
-    E007:
-      ((icdMatched7C1.length > 0 || cptMatched7C11.length > 0) &&
-        cptMatched7C12.length > 0 && 
-	cptMatched7C13.length > 0 &&
-	cptMatched7C14.length > 0) ||
-	((icdMatched7C21.length > 0 || cptMatched7C21.length > 0) &&
-        icdMatched7C22.length > 0 &&
-        cptMatched7C22.length > 0 &&
-        cptMatched7C23.length > 0)
-        ? 1
-        : 0,
-
-  };
-    return updateData;
+    return {
+      ICD7C1: hasCadOrProxy ? 1 : 0,
+      CPT7C11: hasCadOrProxy ? 1 : 0,
+      CPT7C12: hasEncounter ? 1 : 0,
+      CPT7C13: hasEncounter ? 1 : 0,
+      CPT7C14: 0,
+      ICD7C21: hasCadOrProxy ? 1 : 0,
+      ICD7C22: hasPriorMi ? 1 : 0,
+      CPT7C21: hasCadOrProxy ? 1 : 0,
+      CPT7C22: hasEncounter ? 1 : 0,
+      CPT7C23: hasEncounter ? 1 : 0,
+      E007: measureEligible ? 0 : 1,
+      N007_MET: 0,
+      N007_EXCEPTION: 0,
+      N007_NOT_MET: 0,
+      QDC007: "",
+      M007: measureEligible ? 1 : 0,
+    };
   });
 
-return {
-  message: "Measure 7 processed successfully",
-  totalRecords: records.length,
-};
-
-
+  return {
+    message: "Measure 7 processed successfully",
+    totalRecords: records.length,
+  };
 };
 
 
@@ -2327,93 +2004,103 @@ exports.measure404 = async (collection, records) => {
 };
 
 exports.measure50 = async (collection, records) => {
-  const icdCodesToCompare50 = [
-   "F980",
-    "N393",
-    "N3941",
-    "N3942",
-    "N3943",
-    "N3944",
-    "N3945",
-    "N3946",
-    "N39490",
-    "N39491",
-    "N39492",
-    "N39498",
-    "R32",
+  const denominatorDiagnosisCodes = [
+    "F980", "N393", "N3941", "N3942", "N3943", "N3944", "N3945",
+    "N3946", "N39490", "N39491", "N39492", "N39498", "R32",
+  ];
+  const denominatorEncounterCodes = [
+    "97161", "97162", "97163", "97164", "97165", "97166", "97167", "97168",
+    "98000", "98001", "98002", "98003", "98004", "98005", "98006", "98007", "98008",
+    "98009", "98010", "98011", "98012", "98013", "98014", "98015", "98016",
+    "99202", "99203", "99204", "99205", "99212", "99213", "99214", "99215",
+    "99341", "99342", "99344", "99345", "99347", "99348", "99349", "99350", "G0402",
   ];
 
-  const cptCodesToCompare50 = [
- "97161",
-    "97162",
-    "97163",
-    "97164",
-    "97165",
-    "97166",
-    "97167",
-    "97168",
-    "99202",
-    "99203",
-    "99204",
-    "99205",
-    "99212",
-    "99213",
-    "99214",
-    "99215",
-    "99341",
-    "99342",
-    "99344",
-    "99345",
-    "99347",
-    "99348",
-    "99349",
-    "99350",
-    "G0402",
-  ];
-  // for (const record of records) {
-  await bulkUpdateRecords(collection, records, (record) => {
-const icdCodes50 = (record.ICD || "").split(" ");
-    const cptCodes50 = String(record.CPT || "").split(" ");
+  const getPatientKey = (record) => {
+    const raw =
+      record["PAT ID"] ??
+      record["PATID"] ??
+      record["PATIENT ID"] ??
+      record["Patient ID"] ??
+      record["MRN"] ??
+      record["MEMBER ID"] ??
+      record["Member ID"] ??
+      record["PATIENT"];
+    return raw === undefined || raw === null || String(raw).trim() === "" ? String(record._id) : String(raw).trim();
+  };
+  const splitCodes = (value) => String(value || "").trim().split(/\s+/).filter(Boolean);
+  const normalizeCode = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const hasCode = (record, code) => {
+    const target = normalizeCode(code);
+    const tokens = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS), ...splitCodes(record.ICD)];
+    return tokens.some((token) => normalizeCode(token) === target);
+  };
+  const has0509F8P = (record) => {
+    if (hasCode(record, "0509F8P")) return true;
+    if (!hasCode(record, "0509F")) return false;
+    return splitCodes(record.MOD).some((mod) => normalizeCode(mod) === "8P");
+  };
+  const getQdcStatus = (record) => {
+    if (has0509F8P(record)) return { qdc: "0509F8P", met: 0, notMet: 1 };
+    if (hasCode(record, "0509F")) return { qdc: "0509F", met: 1, notMet: 0 };
+    return null;
+  };
 
-    const icdMatched50 = icdCodes50.filter(
-      (code) =>
-        icdCodesToCompare50.includes(code) &&
-        record.AGE >= 65 &&
-        record.GEN === "F"
-    );
+  const patientState = new Map();
+  for (const record of records) {
+    const patientKey = getPatientKey(record);
+    if (!patientKey) continue;
 
-    const cptMatched50 = cptCodes50.filter(
-      (code) =>
-        cptCodesToCompare50.includes(code) &&
-        record.AGE >= 65 &&
-        record.GEN === "F"
-    );
+    const age = Number(record.AGE);
+    const isFemale = String(record.GEN || "").toUpperCase() === "F";
+    const icdCodes = splitCodes(record.ICD).map((code) => normalizeCode(code));
+    const cptCodes = splitCodes(record.CPT).map((code) => normalizeCode(code));
+    const hasDiagnosis = icdCodes.some((code) => denominatorDiagnosisCodes.includes(code));
+    const hasEncounter = cptCodes.some((code) => denominatorEncounterCodes.includes(code));
+    const inDenominator = age >= 65 && isFemale && hasDiagnosis && hasEncounter;
 
-    const cpt1Matched50 =
-      cptCodesToCompare50.includes("G9694") &&
-      record.AGE >= 65 &&
-      record.GEN === "F";
-
-    let updateData = {};
-
-    let m50;
-
-    if (
-      icdMatched50.length > 0 &&
-      cptMatched50.length > 0 &&
-      (cpt1Matched50 == false)
-    ) {
-      m50 = 1;
-    } else {
-      m50 = 0;
+    if (!patientState.has(patientKey)) {
+      patientState.set(patientKey, {
+        hasDenominator: false,
+        excluded: false,
+        bestQdc: "",
+        met: 0,
+        notMet: 0,
+      });
     }
-    updateData = {
-      ICD50: icdMatched50.length > 0 ? 1 : 0,
-      CPT50: cptMatched50.length > 0 ? 1 : 0,
-      M050: m50,
-    };
-    return updateData;
-  });
+
+    const state = patientState.get(patientKey);
+    state.hasDenominator = state.hasDenominator || inDenominator;
+    state.excluded = state.excluded || (inDenominator && hasCode(record, "G9694"));
+
+    const qdcStatus = getQdcStatus(record);
+    if (qdcStatus) {
+      if (!state.bestQdc || (state.met === 0 && qdcStatus.met === 1)) {
+        state.bestQdc = qdcStatus.qdc;
+        state.met = qdcStatus.met;
+        state.notMet = qdcStatus.notMet;
+      }
+    }
+  }
+
+  const updatesByRecord = new WeakMap();
+  for (const record of records) {
+    const patientKey = getPatientKey(record);
+    const state = patientState.get(patientKey);
+    const denominator = state && state.hasDenominator && !state.excluded ? 1 : 0;
+    const hasNumerator = denominator && state.bestQdc;
+
+    updatesByRecord.set(record, {
+      ICD50: denominator,
+      CPT50: denominator,
+      M050: denominator,
+      N050_MET: hasNumerator ? state.met : 0,
+      N050_NOT_MET: hasNumerator ? state.notMet : 0,
+      QDC050: hasNumerator ? state.bestQdc : "",
+    });
+  }
+
+  await bulkUpdateRecords(collection, records, (record) => updatesByRecord.get(record) || {});
 
   return {
     message: "Measure 50 processed successfully",
@@ -2422,463 +2109,287 @@ const icdCodes50 = (record.ICD || "").split(" ");
   // }
 };
 
-
-exports.measure39 = async (collection, records) => {
-  const icdCodesToCompare39 = [
-    "M8000XA",
-    "M8000XD",
-    "M8000XG",
-    "M8000XK",
-    "M8000XP",
-    "M8000XS",
-    "M80011A",
-    "M80011D",
-    "M80011G",
-    "M80011K",
-    "M80011P",
-    "M80011S",
-    "M80012A",
-    "M80012D",
-    "M80012G",
-    "M80012K",
-    "M80012P",
-    "M80012S",
-    "M80019A",
-    "M80019D",
-    "M80019G",
-    "M80019K",
-    "M80019P",
-    "M80019S",
-    "M80021A",
-    "M80021D",
-    "M80021G",
-    "M80021K",
-    "M80021P",
-    "M80021S",
-    "M80022A",
-    "M80022D",
-    "M80022G",
-    "M80022K",
-    "M80022P",
-    "M80022S",
-    "M80029A",
-    "M80029D",
-    "M80029G",
-    "M80029K",
-    "M80029P",
-    "M80029S",
-    "M80031A",
-    "M80031D",
-    "M80031G",
-    "M80031K",
-    "M80031P",
-    "M80031S",
-    "M80032A",
-    "M80032D",
-    "M80032G",
-    "M80032K",
-    "M80032P",
-    "M80032S",
-    "M80039A",
-    "M80039D",
-    "M80039G",
-    "M80039K",
-    "M80039P",
-    "M80039S",
-    "M80041A",
-    "M80041D",
-    "M80041G",
-    "M80041K",
-    "M80041P",
-    "M80041S",
-    "M80042A",
-    "M80042D",
-    "M80042G",
-    "M80042K",
-    "M80042P",
-    "M80042S",
-    "M80049A",
-    "M80049D",
-    "M80049G",
-    "M80049K",
-    "M80049P",
-    "M80049S",
-    "M80051A",
-    "M80051D",
-    "M80051G",
-    "M80051K",
-    "M80051P",
-    "M80051S",
-    "M80052A",
-    "M80052D",
-    "M80052G",
-    "M80052K",
-    "M80052P",
-    "M80052S",
-    "M80059A",
-    "M80059D",
-    "M80059G",
-    "M80059K",
-    "M80059P",
-    "M80059S",
-    "M80061A",
-    "M80061D",
-    "M80061G",
-    "M80061K",
-    "M80061P",
-    "M80061S",
-    "M80062A",
-    "M80062D",
-    "M80062G",
-    "M80062K",
-    "M80062P",
-    "M80062S",
-    "M80069A",
-    "M80069D",
-    "M80069G",
-    "M80069K",
-    "M80069P",
-    "M80069S",
-    "M80071A",
-    "M80071D",
-    "M80071G",
-    "M80071K",
-    "M80071P",
-    "M80071S",
-    "M80072A",
-    "M80072D",
-    "M80072G",
-    "M80072K",
-    "M80072P",
-    "M80072S",
-    "M80079A",
-    "M80079D",
-    "M80079G",
-    "M80079K",
-    "M80079P",
-    "M80079S",
-    "M8008XA",
-    "M8008XD",
-    "M8008XG",
-    "M8008XK",
-    "M8008XP",
-    "M8008XS",
-    "M800AXA",
-    "M800B1A",
-    "M800B1D",
-    "M800B1G",
-    "M800B1K",
-    "M800B1P",
-    "M800B1S",
-    "M800B2A",
-    "M800B2D",
-    "M800B2G",
-    "M800B2K",
-    "M800B2P",
-    "M800B2S",
-    "M800B9A",
-    "M800B9D",
-    "M800B9G",
-    "M800B9K",
-    "M800B9P",
-    "M800B9S",
-    "M8080XA",
-    "M8080XD",
-    "M8080XG",
-    "M8080XK",
-    "M8080XP",
-    "M8080XS",
-    "M80811A",
-    "M80811D",
-    "M80811G",
-    "M80811K",
-    "M80811P",
-    "M80811S",
-    "M80812A",
-    "M80812D",
-    "M80812G",
-    "M80812K",
-    "M80812P",
-    "M80812S",
-    "M80819A",
-    "M80819D",
-    "M80819G",
-    "M80819K",
-    "M80819P",
-    "M80819S",
-    "M80821A",
-    "M80821D",
-    "M80821G",
-    "M80821K",
-    "M80821P",
-    "M80821S",
-    "M80822A",
-    "M80822D",
-    "M80822G",
-    "M80822K",
-    "M80822P",
-    "M80822S",
-    "M80829A",
-    "M80829D",
-    "M80829G",
-    "M80829K",
-    "M80829P",
-    "M80829S",
-    "M80831A",
-    "M80831D",
-    "M80831G",
-    "M80831K",
-    "M80831P",
-    "M80831S",
-    "M80832A",
-    "M80832D",
-    "M80832G",
-    "M80832K",
-    "M80832P",
-    "M80832S",
-    "M80839A",
-    "M80839D",
-    "M80839G",
-    "M80839K",
-    "M80839P",
-    "M80839S",
-    "M80841A",
-    "M80841D",
-    "M80841G",
-    "M80841K",
-    "M80841P",
-    "M80841S",
-    "M80842A",
-    "M80842D",
-    "M80842G",
-    "M80842K",
-    "M80842P",
-    "M80842S",
-    "M80849A",
-    "M80849D",
-    "M80849G",
-    "M80849K",
-    "M80849P",
-    "M80849S",
-    "M80851A",
-    "M80851D",
-    "M80851G",
-    "M80851K",
-    "M80851P",
-    "M80851S",
-    "M80852A",
-    "M80852D",
-    "M80852G",
-    "M80852K",
-    "M80852P",
-    "M80852S",
-    "M80859A",
-    "M80859D",
-    "M80859G",
-    "M80859K",
-    "M80859P",
-    "M80859S",
-    "M80861A",
-    "M80861D",
-    "M80861G",
-    "M80861K",
-    "M80861P",
-    "M80861S",
-    "M80862A",
-    "M80862D",
-    "M80862G",
-    "M80862K",
-    "M80862P",
-    "M80862S",
-    "M80869A",
-    "M80869D",
-    "M80869G",
-    "M80869K",
-    "M80869P",
-    "M80869S",
-    "M80871A",
-    "M80871D",
-    "M80871G",
-    "M80871K",
-    "M80871P",
-    "M80871S",
-    "M80872A",
-    "M80872D",
-    "M80872G",
-    "M80872K",
-    "M80872P",
-    "M80872S",
-    "M80879A",
-    "M80879D",
-    "M80879G",
-    "M80879K",
-    "M80879P",
-    "M80879S",
-    "M8088XA",
-    "M8088XD",
-    "M8088XG",
-    "M8088XK",
-    "M8088XP",
-    "M8088XS",
-    "M808B1A",
-    "M808B1D",
-    "M808B1G",
-    "M808B1K",
-    "M808B1P",
-    "M808B1S",
-    "M808B2A",
-    "M808B2D",
-    "M808B2G",
-    "M808B2K",
-    "M808B2P",
-    "M808B2S",
-    "M808B9A",
-    "M808B9D",
-    "M808B9G",
-    "M808B9K",
-    "M808B9P",
-    "M808B9S",
-    "M810",
-    "M816",
-    "M818",
+exports.measure52 = async (collection, records) => {
+  const copdDiagnosisCodes = [
+    "J410", "J411", "J418", "J42", "J430", "J431", "J432", "J438", "J439",
+    "J440", "J441", "J4489", "J449",
+  ];
+  const encounterCodes = [
+    "99202", "99203", "99204", "99205", "99212", "99213", "99214", "99215", "99424", "99426",
   ];
 
-  const cptCodesToCompare39 = [
-    "99202",
-    "99203",
-    "99204",
-    "99205",
-    "99212",
-    "99213",
-    "99214",
-    "99215",
-  ];
-  // for (const record of records) {
+  const getPatientKey = (record) => {
+    const raw =
+      record["PAT ID"] ??
+      record["PATID"] ??
+      record["PATIENT ID"] ??
+      record["Patient ID"] ??
+      record["MRN"] ??
+      record["MEMBER ID"] ??
+      record["Member ID"] ??
+      record["PATIENT"];
+    return raw === undefined || raw === null || String(raw).trim() === "" ? String(record._id) : String(raw).trim();
+  };
+  const splitCodes = (value) => String(value || "").trim().split(/\s+/).filter(Boolean);
+  const normalizeCode = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const hasCode = (record, code) => {
+    const target = normalizeCode(code);
+    const tokens = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS), ...splitCodes(record.ICD)];
+    return tokens.some((token) => normalizeCode(token) === target);
+  };
 
-  await bulkUpdateRecords(collection, records, (record) => {
-    const icdCodes143C1 = (record.ICD || "").split(" ");
-    const icdCodes143C2 = (record.ICD || "").split(" ");
-    const cpt1Codes143C1 = String(record.CPT || "").split(" ");
-    const cpt2Codes143C1 = String(record.CPT || "").split(" ");
-    const cpt1Codes143C2 = String(record.CPT || "").split(" ");
+  const pickBetterStatus = (current, next) => {
+    const rank = { met: 3, exception: 2, not_met: 1 };
+    return rank[next.status] > rank[current.status] ? next : current;
+  };
 
-    // Add age check for all code matches (AGE >= 18)
-    const icdMatched143C1 = icdCodes143C1.filter((code) => icdCodesToCompare143C1.includes(code) && record.AGE >= 18);
-    const cpt1Matched143C1 = cpt1Codes143C1.filter((code) => cpt1CodesToCompare143C1.includes(code) && record.AGE >= 18);
-    const cpt2Matched143C1 = cpt2Codes143C1.filter((code) => cpt2CodesToCompare143C1.includes(code) && record.AGE >= 18);
+  const c1QdcStatus = (record) => {
+    if (hasCode(record, "M1214")) return { qdc: "M1214", status: "met" };
+    if (hasCode(record, "M1215")) return { qdc: "M1215", status: "exception" };
+    if (hasCode(record, "M1213")) return { qdc: "M1213", status: "exception" };
+    if (hasCode(record, "M1217")) return { qdc: "M1217", status: "exception" };
+    if (hasCode(record, "M1216")) return { qdc: "M1216", status: "not_met" };
+    return null;
+  };
 
-    const icdMatched143C2 = icdCodes143C2.filter((code) => icdCodesToCompare143C2.includes(code) && record.AGE >= 18);
-    // Fix MOD/POS logic to use AND (&&) for correct exclusion
-    const cpt1Matched143C2 = cpt1Codes143C2.filter(
-      (code) =>
-        cpt1CodesToCompare143C2.includes(code) &&
-        record.AGE >= 18 &&
-        (record.MOD !== "GQ" && record.MOD !== "GT") &&
-        (record.POS !== 2 && record.POS !== 10)
-    );
+  const c2QdcStatus = (record) => {
+    if (hasCode(record, "G9695")) return { qdc: "G9695", status: "met" };
+    if (hasCode(record, "G9696")) return { qdc: "G9696", status: "exception" };
+    if (hasCode(record, "G9698")) return { qdc: "G9698", status: "exception" };
+    if (hasCode(record, "G9699")) return { qdc: "G9699", status: "not_met" };
+    return null;
+  };
 
-    let m143 = 0;
-    if (
-      (icdMatched143C1.length > 0 && cpt1Matched143C1.length > 0 && cpt2Matched143C1.length > 0) ||
-      (icdMatched143C2.length > 0 && cpt1Matched143C2.length > 0)
-    ) {
-      m143 = 1;
+  const patientState = new Map();
+  for (const record of records) {
+    const patientKey = getPatientKey(record);
+    if (!patientKey) continue;
+
+    const age = Number(record.AGE);
+    const icdCodes = splitCodes(record.ICD).map((code) => normalizeCode(code));
+    const cptCodes = splitCodes(record.CPT).map((code) => normalizeCode(code));
+    const hasCopdDx = icdCodes.some((code) => copdDiagnosisCodes.includes(code));
+    const hasEncounter = cptCodes.some((code) => encounterCodes.includes(code));
+    const telehealthEncounter = hasCode(record, "M1426");
+    const c1DenominatorHit = age >= 18 && hasCopdDx && hasEncounter && !telehealthEncounter;
+    const c2DenominatorHit = c1DenominatorHit && hasCode(record, "G8924") && hasCode(record, "M1218");
+
+    if (!patientState.has(patientKey)) {
+      patientState.set(patientKey, {
+        c1Denominator: false,
+        c2Denominator: false,
+        c1Best: null,
+        c2Best: null,
+      });
     }
 
-    return {
-      ICD143C1: icdMatched143C1.length > 0 ? 1 : 0,
-      CPT143C1: cpt1Matched143C1.length > 0 && cpt2Matched143C1.length > 0 ? 1 : 0,
-      ICD143C2: icdMatched143C2.length > 0 ? 1 : 0,
-      CPT143C2: cpt1Matched143C2.length > 0 ? 1 : 0,
-      M143: m143,
-    };
-  });
-  // }
+    const state = patientState.get(patientKey);
+    state.c1Denominator = state.c1Denominator || c1DenominatorHit;
+    state.c2Denominator = state.c2Denominator || c2DenominatorHit;
+
+    const c1Status = c1QdcStatus(record);
+    if (c1Status) {
+      state.c1Best = state.c1Best ? pickBetterStatus(state.c1Best, c1Status) : c1Status;
+    }
+
+    const c2Status = c2QdcStatus(record);
+    if (c2Status) {
+      state.c2Best = state.c2Best ? pickBetterStatus(state.c2Best, c2Status) : c2Status;
+    }
+  }
+
+  const updatesByRecord = new WeakMap();
+  for (const record of records) {
+    const state = patientState.get(getPatientKey(record));
+    const c1Eligible = state && state.c1Denominator ? 1 : 0;
+    const c2Eligible = state && state.c2Denominator ? 1 : 0;
+    const c1 = c1Eligible ? state.c1Best : null;
+    const c2 = c2Eligible ? state.c2Best : null;
+
+    updatesByRecord.set(record, {
+      ICD52: c1Eligible,
+      CPT52: c1Eligible,
+      M052: c1Eligible,
+      M052_C1: c1Eligible,
+      N052_C1_MET: c1 && c1.status === "met" ? 1 : 0,
+      N052_C1_EXCEPTION: c1 && c1.status === "exception" ? 1 : 0,
+      N052_C1_NOT_MET: c1 && c1.status === "not_met" ? 1 : 0,
+      QDC052_C1: c1 ? c1.qdc : "",
+      M052_C2: c2Eligible,
+      N052_C2_MET: c2 && c2.status === "met" ? 1 : 0,
+      N052_C2_EXCEPTION: c2 && c2.status === "exception" ? 1 : 0,
+      N052_C2_NOT_MET: c2 && c2.status === "not_met" ? 1 : 0,
+      QDC052_C2: c2 ? c2.qdc : "",
+    });
+  }
+
+  await bulkUpdateRecords(collection, records, (record) => updatesByRecord.get(record) || {});
+
+  return {
+    message: "Measure 52 processed successfully",
+    totalRecords: records.length,
+  };
 };
 
-
-exports.measure47 = async (collection, records) => {
-  const cptCodesToCompare47 = [
-    "90791",
-    "90832",
-    "90834",
-    "90837",
-    "90845",
-    "90846",
-    "90847",
-    "99202",
-    "99203",
-    "99204",
-    "99205",
-    "99212",
-    "99213",
-    "99214",
-    "99215",
-    "99221",
-    "99222",
-    "99223",
-    "99231",
-    "99232",
-    "99233",
-    "99234",
-    "99235",
-    "99236",
-    "99291",
-    "99304",
-    "99305",
-    "99306",
-    "99307",
-    "99308",
-    "99309",
-    "99310",
-    "99341",
-    "99342",
-    "99344",
-    "99345",
-    "99347",
-    "99348",
-    "99349",
-    "99350",
-    "G0402",
-    "G0438",
-    "G0439",
+exports.measure39 = async (collection, records) => {
+  const denominatorEncounterCodes = [
+    "98000", "98001", "98002", "98003", "98004", "98005", "98006", "98007", "98008",
+    "98009", "98010", "98011", "98012", "98013", "98014", "98015", "98016",
+    "99202", "99203", "99204", "99205", "99212", "99213", "99214", "99215",
   ];
-  // for (const record of records) {
-  await bulkUpdateRecords(collection, records, (record) => {
-const cptCodes47 = String(record.CPT || "").split(" ");
 
-    const cptMatched47 = cptCodes47.filter(
-      (code) =>
-        cptCodesToCompare47.includes(code) &&
-        record.AGE >= 65 &&
-        record.POS !== 23
-      //(record.GEN === "M" || record.GEN === "F")
-    );
+  const getPatientKey = (record) => {
+    const raw =
+      record["PAT ID"] ??
+      record["PATID"] ??
+      record["PATIENT ID"] ??
+      record["Patient ID"] ??
+      record["MRN"] ??
+      record["MEMBER ID"] ??
+      record["Member ID"] ??
+      record["PATIENT"];
+    return raw === undefined || raw === null || String(raw).trim() === "" ? String(record._id) : String(raw).trim();
+  };
+  const splitCodes = (value) => String(value || "").trim().split(/\s+/).filter(Boolean);
+  const normalizeCode = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const hasCode = (record, code) => {
+    const target = normalizeCode(code);
+    const tokens = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS), ...splitCodes(record.ICD)];
+    return tokens.some((token) => normalizeCode(token) === target);
+  };
+  const hasOsteoporosisDx = (record) => {
+    const icdTokens = splitCodes(record.ICD).map((code) => normalizeCode(code));
+    return icdTokens.some((code) => code.startsWith("M80") || code === "M810" || code === "M816" || code === "M818");
+  };
+  const patientState = new Map();
+  for (const record of records) {
+    const patientKey = getPatientKey(record);
+    if (!patientKey) continue;
 
-    const cpt1Matched47 = cptCodes47.includes("G9692") && record.AGE >= 65;
-    //(record.GEN === "M" || record.GEN === "F");
+    const age = Number(record.AGE);
+    const isFemale = String(record.GEN || "").toUpperCase() === "F";
+    const cptCodes = splitCodes(record.CPT);
+    const hasEncounter = cptCodes.some((code) => denominatorEncounterCodes.includes(code));
+    const inDenominator = isFemale && age >= 65 && age <= 85 && hasEncounter;
 
-    let updateData = {};
-
-    let m47;
-
-    if (cptMatched47.length > 0 && cpt1Matched47 == false) {
-      m47 = 1;
-    } else {
-      m47 = 0;
+    if (!patientState.has(patientKey)) {
+      patientState.set(patientKey, {
+        hasDenominator: false,
+        excluded: false,
+      });
     }
-    updateData = {
-      CPT47: cptMatched47.length > 0 ? 1 : 0,
-      M047: m47,
-    };
-    return updateData;
-  });
+
+    const state = patientState.get(patientKey);
+    state.hasDenominator = state.hasDenominator || inDenominator;
+    state.excluded = state.excluded || (
+      inDenominator &&
+      (hasCode(record, "M1153") || hasOsteoporosisDx(record) || hasCode(record, "G9690"))
+    );
+  }
+
+  const updatesByRecord = new WeakMap();
+  for (const record of records) {
+    const patientKey = getPatientKey(record);
+    const state = patientState.get(patientKey);
+    const denominator = state && state.hasDenominator && !state.excluded ? 1 : 0;
+
+    updatesByRecord.set(record, {
+      CPT39: denominator,
+      M039: denominator,
+      N039_MET: 0,
+      N039_NOT_MET: 0,
+      QDC039: "",
+    });
+  }
+
+  await bulkUpdateRecords(collection, records, (record) => updatesByRecord.get(record) || {});
 
   return {
     message: "Measure 39 processed successfully",
     totalRecords: records.length,
   };
-  // }
+};
+
+
+exports.measure47 = async (collection, records) => {
+  const denominatorEncounterCodes = [
+    "90791", "90792", "90832", "90834", "90837", "90839", "90845", "90846", "90847",
+    "96116", "96130", "96132", "96110", "96112", "96156", "96105", "96125",
+    "98000", "98001", "98002", "98003", "98004", "98005", "98006", "98007", "98008",
+    "98009", "98010", "98011", "98012", "98013", "98014", "98015", "98016",
+    "99202", "99203", "99204", "99205", "99212", "99213", "99214", "99215",
+    "99221", "99222", "99223", "99231", "99232", "99233", "99234", "99235", "99236",
+    "99291", "99304", "99305", "99306", "99307", "99308", "99309", "99310",
+    "99341", "99342", "99344", "99345", "99347", "99348", "99349", "99350",
+    "G0402", "G0438", "G0439",
+  ];
+
+  const getPatientKey = (record) => {
+    const raw =
+      record["PAT ID"] ??
+      record["PATID"] ??
+      record["PATIENT ID"] ??
+      record["Patient ID"] ??
+      record["MRN"] ??
+      record["MEMBER ID"] ??
+      record["Member ID"] ??
+      record["PATIENT"];
+    return raw === undefined || raw === null || String(raw).trim() === "" ? String(record._id) : String(raw).trim();
+  };
+  const splitCodes = (value) => String(value || "").trim().split(/\s+/).filter(Boolean);
+  const normalizeCode = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const hasCode = (record, code) => {
+    const target = normalizeCode(code);
+    const tokens = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS), ...splitCodes(record.ICD)];
+    return tokens.some((token) => normalizeCode(token) === target);
+  };
+  const patientState = new Map();
+  for (const record of records) {
+    const patientKey = getPatientKey(record);
+    if (!patientKey) continue;
+
+    const age = Number(record.AGE);
+    const cptCodes = splitCodes(record.CPT);
+    const hasEncounter = cptCodes.some((code) => denominatorEncounterCodes.includes(code));
+    const pos = Number(record.POS);
+    const isEligibleEncounter = age >= 65 && hasEncounter && pos !== 23;
+
+    if (!patientState.has(patientKey)) {
+      patientState.set(patientKey, {
+        hasDenominator: false,
+        excluded: false,
+      });
+    }
+
+    const state = patientState.get(patientKey);
+    state.hasDenominator = state.hasDenominator || isEligibleEncounter;
+    state.excluded = state.excluded || (isEligibleEncounter && hasCode(record, "G9692"));
+  }
+
+  const updatesByRecord = new WeakMap();
+  const emittedPatients = new Set();
+  for (const record of records) {
+    const patientKey = getPatientKey(record);
+    const state = patientState.get(patientKey);
+    const shouldIncludePatient = !!(state && state.hasDenominator && !state.excluded);
+    const denominator = shouldIncludePatient && !emittedPatients.has(patientKey) ? 1 : 0;
+    if (denominator) emittedPatients.add(patientKey);
+
+    updatesByRecord.set(record, {
+      CPT47: denominator,
+      M047: denominator,
+      N047_MET: 0,
+      N047_NOT_MET: 0,
+      QDC047: "",
+    });
+  }
+
+  await bulkUpdateRecords(collection, records, (record) => updatesByRecord.get(record) || {});
+
+  return {
+    message: "Measure 47 processed successfully",
+    totalRecords: records.length,
+  };
 };
 
 exports.measure117 = async (collection, records) => {
@@ -2914,103 +2425,119 @@ exports.measure117 = async (collection, records) => {
  "O24812", "O24813", "O24819", "O2482", "O2483"
   ];
   const cptCodesToCompare117 = [
-    "92002",
-    "92004",
-    "92012",
-    "92014",
-    "99202",
-    "99203",
-    "99204",
-    "99205",
-    "99212",
-    "99213",
-    "99214",
-    "99215",
-    "99341",
-    "99342",
-    "99344",
-    "99345",
-    "99347",
-    "99348",
-    "99349",
-    "99350",
-    "99385",
-    "99386",
-    "99387",
-    "99395",
-    "99396",
-    "99397",
-    "G0438",
-    "G0439",
+    "92002", "92004", "92012", "92014",
+    "98000", "98001", "98002", "98003", "98004", "98005", "98006", "98007", "98008",
+    "98009", "98010", "98011", "98012", "98013", "98014", "98015", "98016",
+    "99202", "99203", "99204", "99205", "99212", "99213", "99214", "99215",
+    "99341", "99342", "99344", "99345", "99347", "99348", "99349", "99350",
+    "99385", "99386", "99387", "99395", "99396", "99397",
+    "G0402", "G0438", "G0439",
   ];
-  // for (const record of records) {
-  await bulkUpdateRecords(collection, records, (record) => {
-const icdCodes117 = (record.ICD || "").split(" ");
-    const cptCodes117 = String(record.CPT || "").split(" ");
 
-    const icdMatched117 = icdCodes117.filter(
-      (code) =>
-        icdCodesToCompare117.includes(code) &&
-        record.AGE >= 18 &&
-        record.AGE <= 75
-      //(record.GEN === "M" || record.GEN === "F")
-    );
+  const getPatientKey = (record) => {
+    const raw =
+      record["PAT ID"] ??
+      record["PATID"] ??
+      record["PATIENT ID"] ??
+      record["Patient ID"] ??
+      record["MRN"] ??
+      record["MEMBER ID"] ??
+      record["Member ID"] ??
+      record["PATIENT"];
+    return raw === undefined || raw === null || String(raw).trim() === "" ? String(record._id) : String(raw).trim();
+  };
+  const splitCodes = (value) => String(value || "").trim().split(/\s+/).filter(Boolean);
+  const normalizeCode = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const hasCode = (record, code) => {
+    const target = normalizeCode(code);
+    const tokens = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS), ...splitCodes(record.ICD)];
+    return tokens.some((token) => normalizeCode(token) === target);
+  };
 
-    const cptMatched117 = cptCodes117.filter(
-      (code) =>
-        cptCodesToCompare117.includes(code) &&
-        record.AGE >= 18 &&
-        record.AGE <= 75
-      //(record.GEN === "M" || record.GEN === "F")
-    );
+  const hasAny8PNotMet = (record) => {
+    if (hasCode(record, "2022F8P") || hasCode(record, "2024F8P") || hasCode(record, "2026F8P")) return true;
+    const mods = splitCodes(record.MOD).map((m) => normalizeCode(m));
+    const hasEightP = mods.includes("8P");
+    if (!hasEightP) return false;
+    return hasCode(record, "2022F") || hasCode(record, "2024F") || hasCode(record, "2026F");
+  };
 
-    const cpt1Matched117 =
-      cptCodes117.includes("G9714") && record.AGE >= 18 && record.AGE <= 75;
-    //(record.GEN === "M" || record.GEN === "F");
-    const cpt2Matched1117 =
-      cptCodes117.includes("G9994") && record.AGE >= 18 && record.AGE <= 75;
-    //(record.GEN === "M" || record.GEN === "F");
+  const getQdcStatus = (record) => {
+    if (hasCode(record, "M1220")) return { qdc: "M1220", met: 1, notMet: 0 };
+    if (hasCode(record, "M1221")) return { qdc: "M1221", met: 1, notMet: 0 };
+    if (hasCode(record, "2024F")) return { qdc: "2024F", met: 1, notMet: 0 };
+    if (hasCode(record, "2025F")) return { qdc: "2025F", met: 1, notMet: 0 };
+    if (hasCode(record, "2026F")) return { qdc: "2026F", met: 1, notMet: 0 };
+    if (hasCode(record, "2033F")) return { qdc: "2033F", met: 1, notMet: 0 };
+    if (hasCode(record, "3072F")) return { qdc: "3072F", met: 1, notMet: 0 };
+    if (hasCode(record, "M1429")) return { qdc: "M1429", met: 1, notMet: 0 };
+    if (hasCode(record, "M1430")) return { qdc: "M1430", met: 1, notMet: 0 };
+    if (hasAny8PNotMet(record)) return { qdc: "2022F/2024F/2026F-8P", met: 0, notMet: 1 };
+    return null;
+  };
 
-    const cpt3Matched117 =
-      cptCodes117.includes("G2105") &&
-      record.AGE >= 66 &&
-      (record.POS == 32 ||
-        record.POS == 33 ||
-        record.POS == 34 ||
-        record.POS == 54 ||
-        record.POS == 56);
-    //(record.GEN === "M" || record.GEN === "F");
+  const patientState = new Map();
+  for (const record of records) {
+    const patientKey = getPatientKey(record);
+    if (!patientKey) continue;
 
-    const cpt4Matched117 = cptCodes117.includes("G2106") && record.AGE >= 66;
-    //(record.GEN === "M" || record.GEN === "F");
+    const age = Number(record.AGE);
+    const icdCodes117 = splitCodes(record.ICD).map((code) => normalizeCode(code));
+    const cptCodes117 = splitCodes(record.CPT).map((code) => normalizeCode(code));
+    const hasDiabetesDx = icdCodes117.some((code) => icdCodesToCompare117.includes(code));
+    const hasEncounter = cptCodes117.some((code) => cptCodesToCompare117.includes(code));
+    const inBaseDenominator = age >= 18 && age <= 75 && hasDiabetesDx && hasEncounter;
 
-    const cpt5Matched117 = cptCodes117.includes("G2107") && record.AGE >= 66;
-    //(record.GEN === "M" || record.GEN === "F");
-
-    let updateData = {};
-
-    let m117;
-
-    if (
-      icdMatched117.length > 0 &&
-      cptMatched117.length > 0 &&
-      (cpt1Matched117 == false ||
-        cpt2Matched1117 == false ||
-        cpt3Matched117 == false ||
-        cpt4Matched117 == false ||
-        cpt5Matched117 == false)
-    ) {
-      m117 = 1;
-    } else {
-      m117 = 0;
+    if (!patientState.has(patientKey)) {
+      patientState.set(patientKey, {
+        hasDenominator: false,
+        excluded: false,
+        bestQdc: "",
+        met: 0,
+        notMet: 0,
+      });
     }
-    updateData = {
-      ICD117: icdMatched117.length > 0 ? 1 : 0,
-      CPT117: cptMatched117.length > 0 ? 1 : 0,
-      M117: m117,
-    };
-    return updateData;
-  });
+
+    const state = patientState.get(patientKey);
+    state.hasDenominator = state.hasDenominator || inBaseDenominator;
+
+    const exclusion =
+      (inBaseDenominator && hasCode(record, "G9714")) ||
+      (inBaseDenominator && hasCode(record, "G9994")) ||
+      (inBaseDenominator && age >= 66 && hasCode(record, "G2105")) ||
+      (inBaseDenominator && age >= 66 && hasCode(record, "G2106")) ||
+      (inBaseDenominator && age >= 66 && hasCode(record, "G2107")) ||
+      (inBaseDenominator && hasCode(record, "M1428"));
+    state.excluded = state.excluded || exclusion;
+
+    const qdcStatus = getQdcStatus(record);
+    if (qdcStatus) {
+      if (!state.bestQdc || (state.met === 0 && qdcStatus.met === 1)) {
+        state.bestQdc = qdcStatus.qdc;
+        state.met = qdcStatus.met;
+        state.notMet = qdcStatus.notMet;
+      }
+    }
+  }
+
+  const updatesByRecord = new WeakMap();
+  for (const record of records) {
+    const patientKey = getPatientKey(record);
+    const state = patientState.get(patientKey);
+    const denominator = state && state.hasDenominator && !state.excluded ? 1 : 0;
+    const hasNumerator = denominator && state.bestQdc;
+
+    updatesByRecord.set(record, {
+      ICD117: denominator,
+      CPT117: denominator,
+      M117: denominator,
+      N117_MET: hasNumerator ? state.met : 0,
+      N117_NOT_MET: hasNumerator ? state.notMet : 0,
+      QDC117: hasNumerator ? state.bestQdc : "",
+    });
+  }
+
+  await bulkUpdateRecords(collection, records, (record) => updatesByRecord.get(record) || {});
 
   return {
     message: "Measure 117 processed successfully",
@@ -3020,376 +2547,113 @@ const icdCodes117 = (record.ICD || "").split(" ");
 };
 
 exports.measure126 = async (collection, records) => {
-  const icdCodesToCompare126 = [
-    "E1010",
-    "E1011",
-    "E1021",
-    "E1022",
-    "E1029",
-    "E10311",
-    "E10319",
-    "E103211",
-    "E103212",
-    "E103213",
-    "E103219",
-    "E103291",
-    "E103292",
-    "E103293",
-    "E103299",
-    "E103311",
-    "E103312",
-    "E103313",
-    "E103319",
-    "E103391",
-    "E103392",
-    "E103393",
-    "E103399",
-    "E103411",
-    "E103412",
-    "E103413",
-    "E103419",
-    "E103491",
-    "E103492",
-    "E103493",
-    "E103499",
-    "E103511",
-    "E103512",
-    "E103513",
-    "E103519",
-    "E103521",
-    "E103522",
-    "E103523",
-    "E103529",
-    "E103531",
-    "E103532",
-    "E103533",
-    "E103539",
-    "E103541",
-    "E103542",
-    "E103543",
-    "E103549",
-    "E103551",
-    "E103552",
-    "E103553",
-    "E103559",
-    "E103591",
-    "E103592",
-    "E103593",
-    "E103599",
-    "E10371",
-    "E10372",
-    "E10373",
-    "E10379",
-    "E1036",
-    "E1039",
-    "E1040",
-    "E1041",
-    "E1042",
-    "E1043",
-    "E1044",
-    "E1049",
-    "E1051",
-    "E1052",
-    "E1059",
-    "E10610",
-    "E10618",
-    "E10620",
-    "E10621",
-    "E10622",
-    "E10628",
-    "E10630",
-    "E10638",
-    "E10641",
-    "E10649",
-    "E1065",
-    "E1069",
-    "E108",
-    "E109",
-    "E1100",
-    "E1101",
-    "E1110",
-    "E1111",
-    "E1121",
-    "E1122",
-    "E1129",
-    "E11311",
-    "E11319",
-    "E113211",
-    "E113212",
-    "E113213",
-    "E113219",
-    "E113291",
-    "E113292",
-    "E113293",
-    "E113299",
-    "E113311",
-    "E113312",
-    "E113313",
-    "E113319",
-    "E113391",
-    "E113392",
-    "E113393",
-    "E113399",
-    "E113411",
-    "E113412",
-    "E113413",
-    "E113419",
-    "E113491",
-    "E113492",
-    "E113493",
-    "E113499",
-    "E113511",
-    "E113512",
-    "E113513",
-    "E113519",
-    "E113521",
-    "E113522",
-    "E113523",
-    "E113529",
-    "E113531",
-    "E113532",
-    "E113533",
-    "E113539",
-    "E113541",
-    "E113542",
-    "E113543",
-    "E113549",
-    "E113551",
-    "E113552",
-    "E113553",
-    "E113559",
-    "E113591",
-    "E113592",
-    "E113593",
-    "E113599",
-    "E11371",
-    "E11372",
-    "E11373",
-    "E11379",
-    "E1136",
-    "E1139",
-    "E1140",
-    "E1141",
-    "E1142",
-    "E1143",
-    "E1144",
-    "E1149",
-    "E1151",
-    "E1152",
-    "E1159",
-    "E11610",
-    "E11618",
-    "E11620",
-    "E11621",
-    "E11622",
-    "E11628",
-    "E11630",
-    "E11638",
-    "E11641",
-    "E11649",
-    "E1165",
-    "E1169",
-    "E118",
-    "E119",
-    "E1300",
-    "E1301",
-    "E1310",
-    "E1311",
-    "E1321",
-    "E1322",
-    "E1329",
-    "E13311",
-    "E13319",
-    "E133211",
-    "E133212",
-    "E133213",
-    "E133219",
-    "E133291",
-    "E133292",
-    "E133293",
-    "E133299",
-    "E133311",
-    "E133312",
-    "E133313",
-    "E133319",
-    "E133391",
-    "E133392",
-    "E133393",
-    "E133399",
-    "E133411",
-    "E133412",
-    "E133413",
-    "E133419",
-    "E133491",
-    "E133492",
-    "E133493",
-    "E133499",
-    "E133511",
-    "E133512",
-    "E133513",
-    "E133519",
-    "E133521",
-    "E133522",
-    "E133523",
-    "E133529",
-    "E133531",
-    "E133532",
-    "E133533",
-    "E133539",
-    "E133541",
-    "E133542",
-    "E133543",
-    "E133549",
-    "E133551",
-    "E133552",
-    "E133553",
-    "E133559",
-    "E133591",
-    "E133592",
-    "E133593",
-    "E133599",
-    "E13371",
-    "E13372",
-    "E13373",
-    "E13379",
-    "E1336",
-    "E1339",
-    "E1340",
-    "E1341",
-    "E1342",
-    "E1343",
-    "E1344",
-    "E1349",
-    "E1351",
-    "E1352",
-    "E1359",
-    "E13610",
-    "E13618",
-    "E13620",
-    "E13621",
-    "E13622",
-    "E13628",
-    "E13630",
-    "E13638",
-    "E13641",
-    "E13649",
-    "E1365",
-    "E1369",
-    "E138",
-    "E139",
-    "O24011",
-    "O24012",
-    "O24013",
-    "O24019",
-    "O2402",
-    "O2403",
-    "O24111",
-    "O24112",
-    "O24113",
-    "O24119",
-    "O2412",
-    "O2413",
-    "O24311",
-    "O24312",
-    "O24313",
-    "O24319",
-    "O2432",
-    "O2433",
-    "O24811",
-    "O24812",
-    "O24813",
-    "O24819",
-    "O2482",
-    "O2483",
+  const denominatorEncounterCodes = [
+    "11042","11043","11044","11055","11056","11057","11719","11720","11721","11730","11740",
+    "97161","97162","97163","97164","97597","97802","97803",
+    "99202","99203","99204","99205","99212","99213","99214","99215",
+    "99304","99305","99306","99307","99308","99309","99310",
+    "99341","99342","99344","99345","99347","99348","99349","99350",
   ];
-  const cptCodesToCompare126 = [
-    "11042",
-    "11043",
-    "11044",
-    "11055",
-    "11056",
-    "11057",
-    "11719",
-    "11720",
-    "11721",
-    "11730",
-    "11740",
-    "97161",
-    "97162",
-    "97163",
-    "97164",
-    "97597",
-    "97802",
-    "97803",
-    "99202",
-    "99203",
-    "99204",
-    "99205",
-    "99212",
-    "99213",
-    "99214",
-    "99215",
-    "99304",
-    "99305",
-    "99306",
-    "99307",
-    "99308",
-    "99309",
-    "99310",
-    "99341",
-    "99342",
-    "99344",
-    "99345",
-    "99347",
-    "99348",
-    "99349",
-    "99350",
-  ];
-  // for (const record of records) {
-  await bulkUpdateRecords(collection, records, (record) => {
-const icdCodes126 = (record.ICD || "").split(" ");
-    const cptCodes126 = String(record.CPT || "").split(" ");
 
-    const icdMatched126 = icdCodes126.filter(
-      (code) => icdCodesToCompare126.includes(code) && record.AGE >= 18
-      //(record.GEN === "M" || record.GEN === "F")
-    );
+  const getPatientKey = (record) => {
+    const raw =
+      record["PAT ID"] ??
+      record["PATID"] ??
+      record["PATIENT ID"] ??
+      record["Patient ID"] ??
+      record["MRN"] ??
+      record["MEMBER ID"] ??
+      record["Member ID"] ??
+      record["PATIENT"];
+    return raw === undefined || raw === null || String(raw).trim() === "" ? String(record._id) : String(raw).trim();
+  };
+  const splitCodes = (value) => String(value || "").trim().split(/\s+/).filter(Boolean);
+  const normalizeCode = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const hasCode = (record, code) => {
+    const target = normalizeCode(code);
+    const tokens = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS), ...splitCodes(record.ICD)];
+    return tokens.some((token) => normalizeCode(token) === target);
+  };
+  const hasDiabetesDx = (record) => {
+    const icdTokens = splitCodes(record.ICD).map((code) => normalizeCode(code));
+    return icdTokens.some((code) => code.startsWith("E10") || code.startsWith("E11") || code.startsWith("E13"));
+  };
+  const hasEncounter = (record) => {
+    const cptTokens = splitCodes(record.CPT).map((code) => normalizeCode(code));
+    return cptTokens.some((code) => denominatorEncounterCodes.includes(code));
+  };
+  const getQdcStatus = (record) => {
+    if (hasCode(record, "G8404")) return { qdc: "G8404", status: "met" };
+    if (hasCode(record, "G2179")) return { qdc: "G2179", status: "exception" };
+    if (hasCode(record, "G8405")) return { qdc: "G8405", status: "not_met" };
+    return null;
+  };
+  const pickBetterStatus = (current, incoming) => {
+    const rank = { met: 3, exception: 2, not_met: 1 };
+    return rank[incoming.status] > rank[current.status] ? incoming : current;
+  };
 
-    const cptMatched126 = cptCodes126.filter(
-      (code) =>
-        cptCodesToCompare126.includes(code) &&
-        record.AGE >= 18 &&
-        (record.MOD !== "GQ" ||
-          record.MOD !== "GT" ||
-          record.MOD !== 95 ||
-          record.MOD !== "FQ" ||
-          record.MOD !== 93) &&
-        (record.POS !== 2 || record.POS !== 10)
-      //(record.GEN === "M" || record.GEN === "F")
-    );
+  const patientState = new Map();
+  for (const record of records) {
+    const patientKey = getPatientKey(record);
+    if (!patientKey) continue;
 
-    const cpt1Matched126 = cptCodes126.includes("G2178") && record.AGE >= 18;
+    const age = Number(record.AGE);
+    const inBaseDenominator = age >= 18 && hasDiabetesDx(record) && hasEncounter(record);
+    const telehealthEncounter = hasCode(record, "M1426");
+    const denominatorExclusion = hasCode(record, "G2178");
 
-    let updateData = {};
-
-    let m126;
-
-    if (
-      icdMatched126.length > 0 &&
-      cptMatched126.length > 0 &&
-      cpt1Matched126 == false
-    ) {
-      m126 = 1;
-    } else {
-      m126 = 0;
+    if (!patientState.has(patientKey)) {
+      patientState.set(patientKey, {
+        hasDiabetes: false,
+        hasEncounter: false,
+        ageEligible: false,
+        hasTelehealth: false,
+        excluded: false,
+        bestQdc: null,
+      });
     }
-    updateData = {
-      ICD126: icdMatched126.length > 0 ? 1 : 0,
-      CPT126: cptMatched126.length > 0 ? 1 : 0,
-      M126: m126,
-    };
-    return updateData;
-  });
+
+    const state = patientState.get(patientKey);
+    state.ageEligible = state.ageEligible || age >= 18;
+    state.hasDiabetes = state.hasDiabetes || hasDiabetesDx(record);
+    state.hasEncounter = state.hasEncounter || hasEncounter(record);
+    state.hasTelehealth = state.hasTelehealth || (inBaseDenominator && telehealthEncounter);
+    state.excluded = state.excluded || (inBaseDenominator && denominatorExclusion);
+
+    if (inBaseDenominator) {
+      const qdcStatus = getQdcStatus(record);
+      if (qdcStatus) {
+        state.bestQdc = state.bestQdc ? pickBetterStatus(state.bestQdc, qdcStatus) : qdcStatus;
+      }
+    }
+  }
+
+  const updatesByRecord = new WeakMap();
+  for (const record of records) {
+    const state = patientState.get(getPatientKey(record));
+    const inDenominator =
+      !!state &&
+      state.ageEligible &&
+      state.hasDiabetes &&
+      state.hasEncounter &&
+      !state.hasTelehealth &&
+      !state.excluded;
+
+    const qdc = inDenominator ? state.bestQdc : null;
+
+    updatesByRecord.set(record, {
+      ICD126: inDenominator ? 1 : 0,
+      CPT126: inDenominator ? 1 : 0,
+      M126: inDenominator ? 1 : 0,
+      N126_MET: qdc && qdc.status === "met" ? 1 : 0,
+      N126_EXCEPTION: qdc && qdc.status === "exception" ? 1 : 0,
+      N126_NOT_MET: qdc && qdc.status === "not_met" ? 1 : 0,
+      QDC126: qdc ? qdc.qdc : "",
+    });
+  }
+
+  await bulkUpdateRecords(collection, records, (record) => updatesByRecord.get(record) || {});
 
   return {
     message: "Measure 126 processed successfully",
@@ -3399,68 +2663,81 @@ const icdCodes126 = (record.ICD || "").split(" ");
 };
 
 exports.measure48 = async (collection, records) => {
-  const cptCodesToCompare48 = [
-    "97161",
-    "97162",
-    "97163",
-    "97164",
-    "97165",
-    "97166",
-    "97167",
-    "97168",
-    "99202",
-    "99203",
-    "99204",
-    "99205",
-    "99212",
-    "99213",
-    "99214",
-    "99215",
-    "99341",
-    "99342",
-    "99344",
-    "99345",
-    "99347",
-    "99348",
-    "99349",
-    "99350",
+  const denominatorEncounterCodes = [
+    "97161", "97162", "97163", "97164", "97165", "97166", "97167", "97168",
+    "98000", "98001", "98002", "98003", "98004", "98005", "98006", "98007", "98008",
+    "98009", "98010", "98011", "98012", "98013", "98014", "98015", "98016",
+    "99202", "99203", "99204", "99205", "99212", "99213", "99214", "99215",
+    "99341", "99342", "99344", "99345", "99347", "99348", "99349", "99350",
     "G0402",
   ];
-  // for (const record of records) {
-  await bulkUpdateRecords(collection, records, (record) => {
-const cptCodes48 = String(record.CPT || "").split(" ");
 
-    const cptMatched48 = cptCodes48.filter(
-      (code) =>
-        cptCodesToCompare48.includes(code) &&
-        record.AGE >= 65 &&
-        record.GEN === "F"
-    );
+  const getPatientKey = (record) => {
+    const raw =
+      record["PAT ID"] ??
+      record["PATID"] ??
+      record["PATIENT ID"] ??
+      record["Patient ID"] ??
+      record["MRN"] ??
+      record["MEMBER ID"] ??
+      record["Member ID"] ??
+      record["PATIENT"];
+    return raw === undefined || raw === null || String(raw).trim() === "" ? String(record._id) : String(raw).trim();
+  };
+  const splitCodes = (value) => String(value || "").trim().split(/\s+/).filter(Boolean);
+  const normalizeCode = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const hasCode = (record, code) => {
+    const target = normalizeCode(code);
+    const tokens = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS), ...splitCodes(record.ICD)];
+    return tokens.some((token) => normalizeCode(token) === target);
+  };
+  const patientState = new Map();
+  for (const record of records) {
+    const patientKey = getPatientKey(record);
+    if (!patientKey) continue;
 
-    const cpt1Matched48 =
-      cptCodes48.includes("G9693") && record.AGE >= 65 && record.GEN === "F";
+    const age = Number(record.AGE);
+    const isFemale = String(record.GEN || "").toUpperCase() === "F";
+    const cptCodes = splitCodes(record.CPT);
+    const hasEncounter = cptCodes.some((code) => denominatorEncounterCodes.includes(code));
+    const inDenominator = age >= 65 && isFemale && hasEncounter;
 
-    let updateData = {};
-
-    let m48;
-
-    if (cptMatched48.length > 0 && cpt1Matched48 == false) {
-      m48 = 1;
-    } else {
-      m48 = 0;
+    if (!patientState.has(patientKey)) {
+      patientState.set(patientKey, {
+        hasDenominator: false,
+        excluded: false,
+      });
     }
-    updateData = {
-      CPT48: cptMatched48.length > 0 ? 1 : 0,
-      M048: m48,
-    };
-    return updateData;
-  });
+
+    const state = patientState.get(patientKey);
+    state.hasDenominator = state.hasDenominator || inDenominator;
+    state.excluded = state.excluded || (inDenominator && hasCode(record, "G9693"));
+  }
+
+  const updatesByRecord = new WeakMap();
+  const emittedPatients = new Set();
+  for (const record of records) {
+    const patientKey = getPatientKey(record);
+    const state = patientState.get(patientKey);
+    const shouldIncludePatient = !!(state && state.hasDenominator && !state.excluded);
+    const denominator = shouldIncludePatient && !emittedPatients.has(patientKey) ? 1 : 0;
+    if (denominator) emittedPatients.add(patientKey);
+
+    updatesByRecord.set(record, {
+      CPT48: denominator,
+      M048: denominator,
+      N048_MET: 0,
+      N048_NOT_MET: 0,
+      QDC048: "",
+    });
+  }
+
+  await bulkUpdateRecords(collection, records, (record) => updatesByRecord.get(record) || {});
 
   return {
     message: "Measure 48 processed successfully",
     totalRecords: records.length,
   };
-  // }
 };
 exports.measure134 = async (collection, records) => {
   const cptCodesToCompare134 = [
@@ -3739,459 +3016,184 @@ const cptCodes130 = String(record.CPT || "").split(" ");
   };
   // }
 };
+exports.measure130v2 = async (collection, records) => {
+  const denominatorEncounterCodes = [
+    "59400","59510","59610","59618","90791","90792","90832","90834","90837","90839",
+    "92002","92004","92012","92014","92507","92508","92526","92537","92538","92540",
+    "92541","92542","92544","92545","92548","92549","92550","92557","92567","92568",
+    "92570","92588","92622","92626","92650","92651","92652","92653","96116","96156","96158",
+    "97129","97161","97162","97163","97164","97165","97166","97167","97168","97802","97803",
+    "97804","98000","98001","98002","98003","98004","98005","98006","98007","98008",
+    "98009","98010","98011","98012","98013","98014","98015","98016",
+    "98960","98961","98962","99202","99203","99204","99205","99212","99213","99214","99215",
+    "99221","99222","99223","99236","99281","99282","99283","99284","99285",
+    "99304","99305","99306","99307","99308","99309","99310","99315","99316",
+    "99341","99342","99344","99345","99347","99348","99349","99350",
+    "99385","99386","99387","99395","99396","99397","99424","99491","99495","99496",
+    "G0101","G0108","G0270","G0402","G0438","G0439",
+  ];
+
+  const splitCodes = (value) => String(value || "").trim().split(/\s+/).filter(Boolean);
+  const normalizeCode = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const hasCode = (record, code) => {
+    const target = normalizeCode(code);
+    const tokens = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS), ...splitCodes(record.ICD)];
+    return tokens.some((token) => normalizeCode(token) === target);
+  };
+
+  await bulkUpdateRecords(collection, records, (record) => {
+    const encounterTokens = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS)].map((code) => normalizeCode(code));
+    const inDenominator = encounterTokens.some((code) => denominatorEncounterCodes.includes(code));
+
+    let qdc = "";
+    let met = 0;
+    let exception = 0;
+    let notMet = 0;
+
+    if (inDenominator) {
+      if (hasCode(record, "G8427")) {
+        qdc = "G8427";
+        met = 1;
+      } else if (hasCode(record, "G8430")) {
+        qdc = "G8430";
+        exception = 1;
+      } else if (hasCode(record, "G8428")) {
+        qdc = "G8428";
+        notMet = 1;
+      }
+    }
+
+    return {
+      CPT130: inDenominator ? 1 : 0,
+      M0130: inDenominator ? 1 : 0,
+      M130: inDenominator ? 1 : 0,
+      N130_MET: met,
+      N130_EXCEPTION: exception,
+      N130_NOT_MET: notMet,
+      QDC130: qdc,
+    };
+  });
+
+  return {
+    message: "Measure 130 processed successfully",
+    totalRecords: records.length,
+  };
+};
 
 exports.measure127 = async (collection, records) => {
-  const icdCodesToCompare127 = [
-    "E1010",
-    "E1011",
-    "E1021",
-    "E1022",
-    "E1029",
-    "E10311",
-    "E10319",
-    "E103211",
-    "E103212",
-    "E103213",
-    "E103219",
-    "E103291",
-    "E103292",
-    "E103293",
-    "E103299",
-    "E103311",
-    "E103312",
-    "E103313",
-    "E103319",
-    "E103391",
-    "E103392",
-    "E103393",
-    "E103399",
-    "E103411",
-    "E103412",
-    "E103413",
-    "E103419",
-    "E103491",
-    "E103492",
-    "E103493",
-    "E103499",
-    "E103511",
-    "E103512",
-    "E103513",
-    "E103519",
-    "E103521",
-    "E103522",
-    "E103523",
-    "E103529",
-    "E103531",
-    "E103532",
-    "E103533",
-    "E103539",
-    "E103541",
-    "E103542",
-    "E103543",
-    "E103549",
-    "E103551",
-    "E103552",
-    "E103553",
-    "E103559",
-    "E103591",
-    "E103592",
-    "E103593",
-    "E103599",
-    "E1037X1",
-    "E1037X2",
-    "E1037X3",
-    "E1037X9",
-    "E1036",
-    "E1039",
-    "E1040",
-    "E1041",
-    "E1042",
-    "E1043",
-    "E1044",
-    "E1049",
-    "E1051",
-    "E1052",
-    "E1059",
-    "E10610",
-    "E10618",
-    "E10620",
-    "E10621",
-    "E10622",
-    "E10628",
-    "E10630",
-    "E10638",
-    "E10641",
-    "E10649",
-    "E1065",
-    "E1069",
-    "E1100",
-    "E1101",
-    "E1110",
-    "E1111",
-    "E1121",
-    "E1122",
-    "E1129",
-    "E11311",
-    "E11319",
-    "E113211",
-    "E113212",
-    "E113213",
-    "E113219",
-    "E113291",
-    "E113292",
-    "E113293",
-    "E113299",
-    "E113311",
-    "E113312",
-    "E113313",
-    "E113319",
-    "E113391",
-    "E113392",
-    "E113393",
-    "E113399",
-    "E113411",
-    "E113412",
-    "E113413",
-    "E113419",
-    "E113491",
-    "E113492",
-    "E113493",
-    "E113499",
-    "E113511",
-    "E113512",
-    "E113513",
-    "E113519",
-    "E113521",
-    "E113522",
-    "E113523",
-    "E113529",
-    "E113531",
-    "E113532",
-    "E113533",
-    "E113539",
-    "E113541",
-    "E113542",
-    "E113543",
-    "E113549",
-    "E113551",
-    "E113552",
-    "E113553",
-    "E113559",
-    "E113591",
-    "E113592",
-    "E113593",
-    "E113599",
-    "E1137X1",
-    "E1137X2",
-    "E1137X3",
-    "E1137X9",
-    "E1136",
-    "E1139",
-    "E1140",
-    "E1141",
-    "E1142",
-    "E1143",
-    "E1144",
-    "E1149",
-    "E1151",
-    "E1152",
-    "E1159",
-    "E11610",
-    "E11618",
-    "E11620",
-    "E11621",
-    "E11622",
-    "E11628",
-    "E11630",
-    "E11638",
-    "E11641",
-    "E11649",
-    "E1165",
-    "E1169",
-    "E1300",
-    "E1301",
-    "E1310",
-    "E1311",
-    "E1321",
-    "E1322",
-    "E1329",
-    "E13311",
-    "E13319",
-    "E133211",
-    "E133212",
-    "E133213",
-    "E133219",
-    "E133291",
-    "E133292",
-    "E133293",
-    "E133299",
-    "E133311",
-    "E133312",
-    "E133313",
-    "E133319",
-    "E133391",
-    "E133392",
-    "E133393",
-    "E133399",
-    "E133411",
-    "E133412",
-    "E133413",
-    "E133419",
-    "E133491",
-    "E133492",
-    "E133493",
-    "E133499",
-    "E133511",
-    "E133512",
-    "E133513",
-    "E133519",
-    "E133521",
-    "E133522",
-    "E133523",
-    "E133529",
-    "E133531",
-    "E133532",
-    "E133533",
-    "E133539",
-    "E133541",
-    "E133542",
-    "E133543",
-    "E133549",
-    "E133551",
-    "E133552",
-    "E133553",
-    "E133559",
-    "E133591",
-    "E133592",
-    "E133593",
-    "E133599",
-    "E1337X1",
-    "E1337X2",
-    "E1337X3",
-    "E1337X9",
-    "E1336",
-    "E1339",
-    "E1340",
-    "E1341",
-    "E1342",
-    "E1343",
-    "E1344",
-    "E1349",
-    "E1351",
-    "E1352",
-    "E1359",
-    "E13610",
-    "E13618",
-    "E13620",
-    "E13621",
-    "E13622",
-    "E13628",
-    "E13630",
-    "E13638",
-    "E13641",
-    "E13649",
-    "E1365",
-    "E1369",
-    "E1370",
-    "E1371",
+  const denominatorEncounterCodes = [
+    "11042","11043","11044","11055","11056","11057","11719","11720","11721","11730","11740",
+    "97161","97162","97163","97164","97597","97802","97803",
+    "99202","99203","99204","99205","99212","99213","99214","99215",
+    "99304","99305","99306","99307","99308","99309","99310",
+    "99341","99342","99344","99345","99347","99348","99349","99350","G0127",
   ];
 
-  const cptCodesToCompare127 = [
-    "11042",
-    "11043",
-    "11044",
-    "11055",
-    "11056",
-    "11057",
-    "11719",
-    "11720",
-    "11721",
-    "11730",
-    "11740",
-    "97161",
-    "97162",
-    "97163",
-    "97164",
-    "97597",
-    "97802",
-    "97803",
-    "99202",
-    "99203",
-    "99204",
-    "99205",
-    "99212",
-    "99213",
-    "99214",
-    "99215",
-    "99304",
-    "99305",
-    "99306",
-    "99307",
-    "99308",
-    "99309",
-    "99310",
-    "99341",
-    "99342",
-    "99344",
-    "99345",
-    "99347",
-    "99348",
-    "99349",
-    "99350",
-    "G0127",
-  ];
-  // for (const record of records) {
-  await bulkUpdateRecords(collection, records, (record) => {
-const icdCodes127 = (record.ICD || "").split(" ");
-    const cptCodes127 = String(record.CPT || "").split(" ");
+  const getPatientKey = (record) => {
+    const raw =
+      record["PAT ID"] ??
+      record["PATID"] ??
+      record["PATIENT ID"] ??
+      record["Patient ID"] ??
+      record["MRN"] ??
+      record["MEMBER ID"] ??
+      record["Member ID"] ??
+      record["PATIENT"];
+    return raw === undefined || raw === null || String(raw).trim() === "" ? String(record._id) : String(raw).trim();
+  };
+  const splitCodes = (value) => String(value || "").trim().split(/\s+/).filter(Boolean);
+  const normalizeCode = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const hasCode = (record, code) => {
+    const target = normalizeCode(code);
+    const tokens = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS), ...splitCodes(record.ICD)];
+    return tokens.some((token) => normalizeCode(token) === target);
+  };
+  const hasDiabetesDx = (record) => {
+    const icdTokens = splitCodes(record.ICD).map((code) => normalizeCode(code));
+    return icdTokens.some((code) => code.startsWith("E10") || code.startsWith("E11") || code.startsWith("E13"));
+  };
+  const hasEncounter = (record) => {
+    const cptTokens = splitCodes(record.CPT).map((code) => normalizeCode(code));
+    return cptTokens.some((code) => denominatorEncounterCodes.includes(code));
+  };
+  const getQdcStatus = (record) => {
+    if (hasCode(record, "G8410")) return { qdc: "G8410", status: "met" };
+    if (hasCode(record, "G8416")) return { qdc: "G8416", status: "exception" };
+    if (hasCode(record, "G8415")) return { qdc: "G8415", status: "not_met" };
+    return null;
+  };
+  const pickBetterStatus = (current, incoming) => {
+    const rank = { met: 3, exception: 2, not_met: 1 };
+    return rank[incoming.status] > rank[current.status] ? incoming : current;
+  };
 
-    const icdMatched127 = icdCodes127.filter(
-      (code) => icdCodesToCompare127.includes(code) && record.AGE >= 18
-      //(record.GEN === "M" || record.GEN === "F")
-    );
+  const patientState = new Map();
+  for (const record of records) {
+    const patientKey = getPatientKey(record);
+    if (!patientKey) continue;
 
-    const cptMatched127 = cptCodes127.filter(
-      (code) =>
-        cptCodesToCompare127.includes(code) &&
-        record.AGE >= 18 &&
-        (record.MOD !== "GQ" ||
-          record.MOD !== "GT" ||
-          record.MOD !== 95 ||
-          record.MOD !== "FQ" ||
-          record.MOD !== 93) &&
-        (record.POS !== 2 || record.POS !== 10)
-      //(record.GEN === "M" || record.GEN === "F")
-    );
+    const age = Number(record.AGE);
+    const inBaseDenominator = age >= 18 && hasDiabetesDx(record) && hasEncounter(record);
+    const telehealthEncounter = hasCode(record, "M1426");
+    const denominatorExclusion = hasCode(record, "G2180");
 
-    const cpt1Matched127 = cptCodes127.includes("G2180") && record.AGE >= 18;
-
-    let updateData = {};
-
-    let m127;
-
-    if (
-      icdMatched127.length > 0 &&
-      cptMatched127.length > 0 &&
-      cpt1Matched127 == false
-    ) {
-      m127 = 1;
-    } else {
-      m127 = 0;
+    if (!patientState.has(patientKey)) {
+      patientState.set(patientKey, {
+        ageEligible: false,
+        hasDiabetes: false,
+        hasEncounter: false,
+        hasTelehealth: false,
+        excluded: false,
+        bestQdc: null,
+      });
     }
-    updateData = {
-      ICD127: icdMatched127.length > 0 ? 1 : 0,
-      CPT127: cptMatched127.length > 0 ? 1 : 0,
-      M127: m127,
-    };
-    return updateData;
-  });
+
+    const state = patientState.get(patientKey);
+    state.ageEligible = state.ageEligible || age >= 18;
+    state.hasDiabetes = state.hasDiabetes || hasDiabetesDx(record);
+    state.hasEncounter = state.hasEncounter || hasEncounter(record);
+    state.hasTelehealth = state.hasTelehealth || (inBaseDenominator && telehealthEncounter);
+    state.excluded = state.excluded || (inBaseDenominator && denominatorExclusion);
+
+    if (inBaseDenominator) {
+      const qdcStatus = getQdcStatus(record);
+      if (qdcStatus) {
+        state.bestQdc = state.bestQdc ? pickBetterStatus(state.bestQdc, qdcStatus) : qdcStatus;
+      }
+    }
+  }
+
+  const updatesByRecord = new WeakMap();
+  for (const record of records) {
+    const state = patientState.get(getPatientKey(record));
+    const inDenominator =
+      !!state &&
+      state.ageEligible &&
+      state.hasDiabetes &&
+      state.hasEncounter &&
+      !state.hasTelehealth &&
+      !state.excluded;
+    const qdc = inDenominator ? state.bestQdc : null;
+
+    updatesByRecord.set(record, {
+      ICD127: inDenominator ? 1 : 0,
+      CPT127: inDenominator ? 1 : 0,
+      M127: inDenominator ? 1 : 0,
+      N127_MET: qdc && qdc.status === "met" ? 1 : 0,
+      N127_EXCEPTION: qdc && qdc.status === "exception" ? 1 : 0,
+      N127_NOT_MET: qdc && qdc.status === "not_met" ? 1 : 0,
+      QDC127: qdc ? qdc.qdc : "",
+    });
+  }
+
+  await bulkUpdateRecords(collection, records, (record) => updatesByRecord.get(record) || {});
 
   return {
     message: "Measure 127 processed successfully",
     totalRecords: records.length,
   };
-  // }
 };
-exports.measure141 = async (collection, records) => {
-  const icdCodesToCompare141 = [
-    "H401111",
-    "H401112",
-    "H401113",
-    "H401114",
-    "H401121",
-    "H401122",
-    "H401123",
-    "H401124",
-    "H401131",
-    "H401132",
-    "H401133",
-    "H401134",
-    "H401211",
-    "H401212",
-    "H401213",
-    "H401214",
-    "H401221",
-    "H401222",
-    "H401223",
-    "H401224",
-    "H401231",
-    "H401232",
-    "H401233",
-    "H401234",
-    "H40151",
-    "H40152",
-    "H40153",
-  ];
-
-  const cptCodesToCompare141 = [
-    "92002",
-    "92004",
-    "92012",
-    "92014",
-    "99202",
-    "99203",
-    "99204",
-    "99205",
-    "99212",
-    "99213",
-    "99214",
-    "99215",
-    "99307",
-    "99308",
-    "99309",
-    "99310",
-    "99341",
-    "99342",
-    "99344",
-    "99345",
-    "99347",
-    "99348",
-    "99349",
-    "99350",
-  ];
-  // for (const record of records) {
-  await bulkUpdateRecords(collection, records, (record) => {
-const icdCodes141 = (record.ICD || "").split(" ");
-    const cptCodes141 = String(record.CPT || "").split(" ");
-
-    //Measure 141 Compare
-    const icdMatched141 = icdCodes141.filter(
-      (code) => icdCodesToCompare141.includes(code) && record.AGE >= 18
-      //(record.GEN === "M" || record.GEN === "F")
-    );
-
-    const cptMatched141 = cptCodes141.filter(
-      (code) =>
-        cptCodesToCompare141.includes(code) &&
-        record.AGE >= 18 &&
-        (record.MOD !== "GQ" || record.MOD !== "GT" || record.MOD !== 95) &&
-        (record.POS !== 2 || record.POS !== 10 || record.POS !== 12)
-      //(record.GEN === "M" || record.GEN === "F")
-    );
-
-    let updateData = {};
-
-    let m141;
-
-    if (icdMatched141.length > 0 && cptMatched141.length > 0) {
-      m141 = 1;
-    } else {
-      m141 = 0;
-    }
-    updateData = {
-      ICD141: icdMatched141.length > 0 ? 1 : 0,
-      CPT141: cptMatched141.length > 0 ? 1 : 0,
-      M141: m141,
-    };
-    return updateData;
-  });
-
-  return {
-    message: "Measure 141 processed successfully",
-    totalRecords: records.length,
-  };
-  // }
-};
+exports.measure127v2 = exports.measure127;
 exports.measure185 = async (collection, records) => {
   const cptCodesToCompare185 = [
     "44388",
@@ -10729,201 +9731,108 @@ const icdCodes221 = (record.ICD || "").split(" ");
 };
 
 exports.measure8 = async (collection, records) => {
-  const icdCodesToCompare8C1 = [
-    "I110",
-    "I130",
-    "I132",
-    "I501",
-    "I5020",
-    "I5021",
-    "I5022",
-    "I5023",
-    "I5030",
-    "I5031",
-    "I5032",
-    "I5033",
-    "I5040",
-    "I5041",
-    "I5042",
-    "I5043",
-    "I50814",
-    "I5082",
-    "I5083",
-    "I5084",
-    "I5089",
-    "I509",
+  const hfIcdCodes = [
+    "I110", "I130", "I132", "I501", "I5020", "I5021", "I5022", "I5023", "I5030",
+    "I5031", "I5032", "I5033", "I5040", "I5041", "I5042", "I5043", "I50814", "I5082",
+    "I5083", "I5084", "I5089", "I509"
   ];
-  const icdCodesToCompare8C2 = [
-    "I110",
-    "I130",
-    "I132",
-    "I501",
-    "I5020",
-    "I5021",
-    "I5022",
-    "I5023",
-    "I5030",
-    "I5031",
-    "I5032",
-    "I5033",
-    "I5040",
-    "I5041",
-    "I5042",
-    "I5043",
-    "I50814",
-    "I5082",
-    "I5083",
-    "I5084",
-    "I5089",
-    "I509",
+  const outpatientEncounterCodes = [
+    "98000", "98001", "98002", "98003", "98004", "98005", "98006", "98007", "98008",
+    "98009", "98010", "98011", "98012", "98013", "98014", "98015", "98016",
+    "99202", "99203", "99204", "99205", "99212", "99213", "99214", "99215",
+    "99242", "99243", "99244", "99245", "99304", "99305", "99306", "99307", "99308",
+    "99309", "99310", "99315", "99316", "99341", "99342", "99344", "99345", "99347",
+    "99348", "99349", "99350", "99424", "99426"
   ];
+  const dischargeEncounterCodes = ["99238", "99239"];
 
-  const cpt1CodesToCompare8C1 = [
-    "99202",
-    "99203",
-    "99204",
-    "99205",
-    "99212",
-    "99213",
-    "99214",
-    "99215",
-    "99242",
-    "99243",
-    "99244",
-    "99245",
-    "99304",
-    "99305",
-    "99306",
-    "99307",
-    "99308",
-    "99309",
-    "99310",
-    "99315",
-    "99316",
-    "99341",
-    "99342",
-    "99344",
-    "99345",
-    "99347",
-    "99348",
-    "99349",
-    "99350",
-    "99424",
-    "99426",
-  ];
-  const cpt2CodesToCompare8C1 = [
-    "99202",
-    "99203",
-    "99204",
-    "99205",
-    "99212",
-    "99213",
-    "99214",
-    "99215",
-    "99242",
-    "99243",
-    "99244",
-    "99245",
-    "99304",
-    "99305",
-    "99306",
-    "99307",
-    "99308",
-    "99309",
-    "99310",
-    "99315",
-    "99316",
-    "99341",
-    "99342",
-    "99344",
-    "99345",
-    "99347",
-    "99348",
-    "99349",
-    "99350",
-    "99424",
-    "99426",
-  ];
-  const cpt1CodesToCompare8C2 = ["99238", "99239"];
+  const getPatientKey = (record) => {
+    const raw =
+      record["PAT ID"] ??
+      record["PATID"] ??
+      record["PATIENT ID"] ??
+      record["Patient ID"] ??
+      record["MRN"] ??
+      record["MEMBER ID"] ??
+      record["Member ID"] ??
+      record["PATIENT"];
+    return raw === undefined || raw === null ? String(record._id) : String(raw);
+  };
 
-  // console.log("Measure8>>>>>", records);
-  // for (const record of records) {
-  await bulkUpdateRecords(collection, records, (record) => {
-const icdCodes8C1 = (record.ICD || "").split(" ");
-    const icdCodes8C2 = (record.ICD || "").split(" ");
-    const cpt1Codes8C1 = String(record.CPT || "").split(" ");
-    const cpt2Codes8C1 = String(record.CPT || "").split(" ");
-    const cpt1Codes8C2 = String(record.CPT || "").split(" ");
+  const hasToken = (record, token) => {
+    const codeString = `${record.CPT || ""} ${record.ICD || ""} ${record.MOD || ""}`;
+    return codeString.split(" ").includes(token);
+  };
 
-    const icdMatched8C1 = icdCodes8C1.filter(
-      (code) => icdCodesToCompare8C1.includes(code) && record.AGE >= 18
-      //(record.GEN === "M" || record.GEN === "F")
-    );
-    const cpt1Matched8C1 = cpt1Codes8C1.filter(
-      (code) => cpt2CodesToCompare8C1.includes(code) && record.AGE >= 18
-      //(record.GEN === "M" || record.GEN === "F")
-    );
-    const cpt2Matched8C1 = cpt2Codes8C1.filter(
-      (code) => cpt2CodesToCompare8C1.includes(code) && record.AGE >= 18
-      //(record.GEN === "M" || record.GEN === "F")
-    );
-    const cpt3Matched8C1 =
-      cpt1CodesToCompare8C1.includes("G8923") && record.AGE >= 18;
-    //(record.GEN === "M" || record.GEN === "F");
-    const icd1Matched8C1 =
-      icdCodesToCompare8C1.includes("M1152") && record.AGE >= 18;
-    //(record.GEN === "M" || record.GEN === "F");
-    const icd1Matched8C2 =
-      icdCodesToCompare8C1.includes("M1152") && record.AGE >= 18;
-    //(record.GEN === "M" || record.GEN === "F");
-    const cpt1Matched8C2 = cpt1Codes8C2.filter(
-      (code) => cpt1CodesToCompare8C2.includes(code) && record.AGE >= 18
-      //(record.GEN === "M" || record.GEN === "F")
-    );
-    const cpt2Matched8C2 =
-      cpt2CodesToCompare8C1.includes("G8923") && record.AGE >= 18;
-    //(record.GEN === "M" || record.GEN === "F");
+  const patientState = new Map();
 
-    let updateData = {};
-
-    let m008;
-
-    if (
-      (icdMatched8C1.length > 0 &&
-        cpt1Matched8C1.length > 0 &&
-        cpt2Matched8C1.length > 0 &&
-        icd1Matched8C1 === false) ||
-      (icd1Matched8C2.length > 0 &&
-        cpt1Matched8C2.length > 0 &&
-        cpt2Matched8C2.length > 0 &&
-        icd1Matched8C2 === false)
-    ) {
-      // console.log("okkkkkkkk");
-      m008 = 1;
-    } else {
-      m008 = 0;
+  for (const record of records) {
+    const patientKey = getPatientKey(record);
+    if (!patientState.has(patientKey)) {
+      patientState.set(patientKey, {
+        qualifyingOutpatientEncounters: 0,
+        hasQualifyingDischargeEncounter: false,
+        hasLvefLE40: false,
+        hasTransplantOrLvad: false,
+      });
     }
+    const state = patientState.get(patientKey);
 
-    updateData = {
-      ICD8C1: icdMatched8C1.length > 0 ? 1 : 0,
-      CPT8C1: cpt1Matched8C1.length > 0 && cpt2Matched8C1.length > 0 ? 1 : 0,
-      ICD8C2: icd1Matched8C2.length > 0 ? 1 : 0,
-      CPT8C2: cpt1Matched8C2.length > 0 ? 1 : 0,
-      M008: m008,
-      E008:
-        (icdMatched8C1.length > 0 &&
-          cpt1Matched8C1.length > 0 &&
-          cpt2Matched8C1.length > 0 &&
-          cpt3Matched8C1.length > 0 &&
-          icd1Matched8C1 === false) ||
-        (icd1Matched8C2.length > 0 &&
-          cpt1Matched8C2.length > 0 &&
-          cpt2Matched8C2.length > 0 &&
-          icd1Matched8C2 === false)
-          ? 1
-          : 0,
+    const icdCodes = String(record.ICD || "").split(" ");
+    const cptCodes = String(record.CPT || "").split(" ");
+    const inAgeRange = Number(record.AGE) >= 18;
+
+    const hasHeartFailureDxOnRecord =
+      inAgeRange && icdCodes.some((code) => hfIcdCodes.includes(code));
+    const hasOutpatientEncounter =
+      inAgeRange && cptCodes.some((code) => outpatientEncounterCodes.includes(code));
+    const hasDischargeEncounter =
+      inAgeRange && cptCodes.some((code) => dischargeEncounterCodes.includes(code));
+    const hasTelehealthForC2 = hasToken(record, "M1426");
+
+    if (hasOutpatientEncounter && hasHeartFailureDxOnRecord) {
+      state.qualifyingOutpatientEncounters += 1;
+    }
+    if (hasDischargeEncounter && hasHeartFailureDxOnRecord && !hasTelehealthForC2) {
+      state.hasQualifyingDischargeEncounter = true;
+    }
+    state.hasLvefLE40 = state.hasLvefLE40 || hasToken(record, "G8923");
+    state.hasTransplantOrLvad = state.hasTransplantOrLvad || hasToken(record, "M1152");
+  }
+
+  await bulkUpdateRecords(collection, records, (record) => {
+    const patientKey = getPatientKey(record);
+    const state = patientState.get(patientKey);
+    if (!state) return null;
+
+    const inAgeRange = Number(record.AGE) >= 18;
+
+    const criteria1Eligible =
+      inAgeRange &&
+      state.qualifyingOutpatientEncounters >= 2 &&
+      state.hasLvefLE40 &&
+      !state.hasTransplantOrLvad;
+
+    const criteria2Eligible =
+      inAgeRange &&
+      state.hasQualifyingDischargeEncounter &&
+      state.hasLvefLE40 &&
+      !state.hasTransplantOrLvad;
+
+    const measureEligible = criteria1Eligible || criteria2Eligible;
+
+    return {
+      ICD8C1: state.qualifyingOutpatientEncounters > 0 ? 1 : 0,
+      CPT8C1: state.qualifyingOutpatientEncounters >= 2 ? 1 : 0,
+      ICD8C2: state.hasQualifyingDischargeEncounter ? 1 : 0,
+      CPT8C2: state.hasQualifyingDischargeEncounter ? 1 : 0,
+      E008: measureEligible ? 0 : 1,
+      N008_MET: 0,
+      N008_EXCEPTION: 0,
+      N008_NOT_MET: 0,
+      QDC008: "",
+      M008: measureEligible ? 1 : 0,
     };
-    return updateData;
   });
 
   return {
@@ -23506,139 +22415,257 @@ return {
 
 
 };
-exports.measure116 = async (collection, records) => {
-  const icdCodesToCompare116 = [
-    "J203",
-    "J204",
-    "J205",
-    "J206",
-    "J207",
-    "J208",
-    "J209",
-    "J210",
-    "J211",
-    "J218",
-    "J219",
+exports.measure118v2 = async (collection, records) => {
+  const cadDiagnosisCodes = [
+    "I200","I201","I202","I2081","I2089","I209","I2101","I2102","I2109","I2111","I2119","I2121","I2129","I213","I214",
+    "I219","I21A9","I240","I2489","I249","I2510","I25110","I25111","I25112","I25118","I25119","I252","I255","I256",
+    "I25700","I25701","I25702","I25708","I25709","I25710","I25711","I25712","I25718","I25719","I25720","I25721","I25722",
+    "I25728","I25729","I25730","I25731","I25732","I25738","I25739","I25750","I25751","I25752","I25758","I25759","I25760",
+    "I25761","I25762","I25768","I25769","I25790","I25791","I25792","I25798","I25799","I25810","I25811","I25812","I2582",
+    "I2583","I2584","I2589","I259","Z951","Z955","Z9861",
+  ];
+  const encounterCodes = [
+    "98000","98001","98002","98003","98004","98005","98006","98007","98008","98009","98010","98011","98012","98013","98014","98015","98016",
+    "99202","99203","99204","99205","99212","99213","99214","99215","99242","99243","99244","99245",
+    "99304","99305","99306","99307","99308","99309","99310","99315","99316","99341","99342","99344","99345","99347","99348","99349","99350",
+    "99424","99426",
   ];
 
-  const cptCodesToCompare116 = [
-    "98966",
-    "98967",
-    "98968",
-    "98970",
-    "98971",
-    "98972",
-    "99202",
-    "99203",
-    "99204",
-    "99205",
-    "99211",
-    "99212",
-    "99213",
-    "99214",
-    "99215",
-    "99221",
-    "99222",
-    "99223",
-    "99238",
-    "99239",
-    "99242",
-    "99243",
-    "99244",
-    "99245",
-    "99281",
-    "99282",
-    "99283",
-    "99284",
-    "99285",
-    "99341",
-    "99342",
-    "99344",
-    "99345",
-    "99347",
-    "99348",
-    "99349",
-    "99350",
-    "99381",
-    "99382",
-    "99383",
-    "99384",
-    "99385",
-    "99386",
-    "99387",
-    "99391",
-    "99392",
-    "99393",
-    "99394",
-    "99395",
-    "99396",
-    "99397",
-    "99401",
-    "99402",
-    "99403",
-    "99404",
-    "99411",
-    "99412",
-    "99421",
-    "99422",
-    "99423",
-    "99429",
-    "99441",
-    "99442",
-    "99443",
-    "99455",
-    "99456",
-    "99457",
-    "99483",
-    "G0071",
-    "G0402",
-    "G0438",
-    "G0439",
-    "G0463",
-    "G2010",
-    "G2012",
-    "G2250",
-    "G2251",
-    "G2252",
-    "T1015",
-  ];
+  const getPatientKey = (record) => {
+    const raw =
+      record["PAT ID"] ??
+      record["PATID"] ??
+      record["PATIENT ID"] ??
+      record["Patient ID"] ??
+      record["MRN"] ??
+      record["MEMBER ID"] ??
+      record["Member ID"] ??
+      record["PATIENT"];
+    return raw === undefined || raw === null || String(raw).trim() === "" ? String(record._id) : String(raw).trim();
+  };
+  const splitCodes = (value) => String(value || "").trim().split(/\s+/).filter(Boolean);
+  const normalizeCode = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const hasCode = (record, code) => {
+    const target = normalizeCode(code);
+    const tokens = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS), ...splitCodes(record.ICD)];
+    return tokens.some((token) => normalizeCode(token) === target);
+  };
+  const hasDiabetesDx = (record) => {
+    const icdTokens = splitCodes(record.ICD).map((code) => normalizeCode(code));
+    return icdTokens.some((code) => code.startsWith("E10") || code.startsWith("E11") || code.startsWith("E13") || code.startsWith("O24"));
+  };
+  const countEncounters = (record) => {
+    const cptTokens = splitCodes(record.CPT).map((code) => normalizeCode(code));
+    return cptTokens.filter((code) => encounterCodes.includes(code)).length;
+  };
+  const pickBetter = (current, next) => {
+    const rank = { met: 3, exception: 2, not_met: 1 };
+    return rank[next.status] > rank[current.status] ? next : current;
+  };
+  const c1Status = (record) => {
+    if (hasCode(record, "G8935")) return { qdc: "G8935", status: "met" };
+    if (hasCode(record, "G8936")) return { qdc: "G8936", status: "exception" };
+    if (hasCode(record, "G8937")) return { qdc: "G8937", status: "not_met" };
+    return null;
+  };
+  const c2Status = (record) => {
+    if (hasCode(record, "G8473")) return { qdc: "G8473", status: "met" };
+    if (hasCode(record, "G8474")) return { qdc: "G8474", status: "exception" };
+    if (hasCode(record, "G8475")) return { qdc: "G8475", status: "not_met" };
+    return null;
+  };
 
-  await bulkUpdateRecords(collection, records, (record) => {
-const icdCodes116 = (record.ICD || "").split(" ");
-    const cptCodes116 = String(record.CPT || "").split(" ");
+  const patientState = new Map();
+  for (const record of records) {
+    const patientKey = getPatientKey(record);
+    if (!patientKey) continue;
 
-    const icdMatched116 = icdCodes116.filter((code) =>
-      icdCodesToCompare116.includes(code)
-    );
+    const age = Number(record.AGE);
+    const icdTokens = splitCodes(record.ICD).map((code) => normalizeCode(code));
+    const hasCad = icdTokens.some((code) => cadDiagnosisCodes.includes(code));
+    const encounterCount = countEncounters(record);
+    const hasLvefLe40 = hasCode(record, "G8934");
+    const diabetic = hasDiabetesDx(record);
 
-    const cptMatched116 = cptCodes116.filter(
-      (code) => cptCodesToCompare116.includes(code) && record.POS !== 21
-    );
-
-    const cpt1Matched116 = cptCodes116.includes("G2176");
-    const cpt2Matched116 = cptCodes116.includes("G2177");
-    const cpt3Matched116 = cptCodes116.includes("G9712");
-    const cpt4Matched116 = cptCodes116.includes("G9173");
-
-    let updateData = {};
-    let m116;
-
-    if (
-      icdMatched116.length > 0 &&
-      cptMatched116.length > 0 &&
-      (!cpt1Matched116 || !cpt2Matched116 || !cpt3Matched116 || !cpt4Matched116)
-    ) {
-      m116 = 1;
-    } else {
-      m116 = 0;
+    if (!patientState.has(patientKey)) {
+      patientState.set(patientKey, {
+        ageEligible: false,
+        hasCad: false,
+        encounterCount: 0,
+        hasLvefLe40: false,
+        hasDiabetes: false,
+        bestC1: null,
+        bestC2: null,
+      });
     }
 
-    updateData = {
-      ICD116: icdMatched116.length > 0 ? 1 : 0,
-      CPT116: cptMatched116.length > 0 ? 1 : 0,
-      M116: m116,
+    const state = patientState.get(patientKey);
+    state.ageEligible = state.ageEligible || age >= 18;
+    state.hasCad = state.hasCad || hasCad;
+    state.encounterCount += encounterCount;
+    state.hasLvefLe40 = state.hasLvefLe40 || hasLvefLe40;
+    state.hasDiabetes = state.hasDiabetes || diabetic;
+
+    const s1 = c1Status(record);
+    if (s1) state.bestC1 = state.bestC1 ? pickBetter(state.bestC1, s1) : s1;
+    const s2 = c2Status(record);
+    if (s2) state.bestC2 = state.bestC2 ? pickBetter(state.bestC2, s2) : s2;
+  }
+
+  const updatesByRecord = new WeakMap();
+  for (const record of records) {
+    const state = patientState.get(getPatientKey(record));
+    const baseEligible = state && state.ageEligible && state.hasCad && state.encounterCount >= 2;
+    const eligibleC2 = baseEligible && state.hasDiabetes ? 1 : 0;
+    const eligibleC1 = baseEligible && state.hasLvefLe40 && !state.hasDiabetes ? 1 : 0;
+
+    const c1 = eligibleC1 ? state.bestC1 : null;
+    const c2 = eligibleC2 ? state.bestC2 : null;
+    const anyEligible = eligibleC1 || eligibleC2 ? 1 : 0;
+
+    updatesByRecord.set(record, {
+      M118: anyEligible,
+      M00118: anyEligible,
+      M118_C1: eligibleC1,
+      N118_C1_MET: c1 && c1.status === "met" ? 1 : 0,
+      N118_C1_EXCEPTION: c1 && c1.status === "exception" ? 1 : 0,
+      N118_C1_NOT_MET: c1 && c1.status === "not_met" ? 1 : 0,
+      QDC118_C1: c1 ? c1.qdc : "",
+      M118_C2: eligibleC2,
+      N118_C2_MET: c2 && c2.status === "met" ? 1 : 0,
+      N118_C2_EXCEPTION: c2 && c2.status === "exception" ? 1 : 0,
+      N118_C2_NOT_MET: c2 && c2.status === "not_met" ? 1 : 0,
+      QDC118_C2: c2 ? c2.qdc : "",
+      E00118: eligibleC1 && state.hasLvefLe40 ? 1 : 0,
+    });
+  }
+
+  await bulkUpdateRecords(collection, records, (record) => updatesByRecord.get(record) || {});
+
+  return {
+    message: "Measure 118 processed successfully",
+    totalRecords: records.length,
+  };
+};
+exports.measure116 = async (collection, records) => {
+  const bronchitisDiagnosisCodes = [
+    "J203", "J204", "J205", "J206", "J207", "J208", "J209", "J210", "J211", "J218", "J219",
+  ];
+  const denominatorEncounterCodes = [
+    "98000", "98001", "98002", "98003", "98004", "98005", "98006", "98007", "98008",
+    "98009", "98010", "98011", "98012", "98013", "98014", "98015", "98016",
+    "98966", "98967", "98968", "98970", "98971", "98972",
+    "99202", "99203", "99204", "99205", "99211", "99212", "99213", "99214", "99215",
+    "99221", "99222", "99223", "99238", "99239", "99242", "99243", "99244", "99245",
+    "99281", "99282", "99283", "99284", "99285", "99341", "99342", "99344", "99345",
+    "99347", "99348", "99349", "99350", "99381", "99382", "99383", "99384", "99385",
+    "99386", "99387", "99391", "99392", "99393", "99394", "99395", "99396", "99397",
+    "99401", "99402", "99403", "99404", "99411", "99412", "99421", "99422", "99423",
+    "99429", "99455", "99456", "99457", "99470", "99483", "G0071", "G0402", "G0438",
+    "G0439", "G0463", "G2010", "G2250", "G2251", "G2252", "T1015",
+  ];
+
+  const splitCodes = (value) => String(value || "").trim().split(/\s+/).filter(Boolean);
+  const normalizeCode = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const getPatientKey = (record) => {
+    const raw =
+      record["PAT ID"] ??
+      record["PATID"] ??
+      record["PATIENT ID"] ??
+      record["Patient ID"] ??
+      record["MRN"] ??
+      record["MEMBER ID"] ??
+      record["Member ID"] ??
+      record["PATIENT"];
+    return raw === undefined || raw === null || String(raw).trim() === "" ? String(record._id) : String(raw).trim();
+  };
+  const hasCode = (record, code) => {
+    const target = normalizeCode(code);
+    const tokens = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS), ...splitCodes(record.ICD)];
+    return tokens.some((token) => normalizeCode(token) === target);
+  };
+  const toDateValue = (dosValue) => {
+    const raw = String(dosValue || "").trim();
+    if (!raw) return null;
+    const date = new Date(raw);
+    if (!Number.isNaN(date.getTime())) return date.getTime();
+    const digits = raw.replace(/\D/g, "");
+    if (digits.length === 8) {
+      const yyyy = Number(digits.slice(0, 4));
+      const mm = Number(digits.slice(4, 6));
+      const dd = Number(digits.slice(6, 8));
+      const parsed = new Date(yyyy, mm - 1, dd).getTime();
+      return Number.isNaN(parsed) ? null : parsed;
+    }
+    return null;
+  };
+  const dayDiff = (a, b) => Math.floor(Math.abs(a - b) / (24 * 60 * 60 * 1000));
+  const getQdcStatus = (record) => {
+    if (hasCode(record, "4124F")) return { qdc: "4124F", met: 1, notMet: 0 };
+    if (hasCode(record, "4120F")) return { qdc: "4120F", met: 0, notMet: 1 };
+    return null;
+  };
+
+  const episodeState = new WeakMap();
+  const patientEpisodes = new Map();
+
+  for (const record of records) {
+    const age = Number(record.AGE);
+    const icdCodes = splitCodes(record.ICD).map((code) => normalizeCode(code));
+    const cptCodes = splitCodes(record.CPT).map((code) => normalizeCode(code));
+    const hasBronchitisDx = icdCodes.some((code) => bronchitisDiagnosisCodes.includes(code));
+    const hasEncounter = cptCodes.some((code) => denominatorEncounterCodes.includes(code));
+    const isPos21 = Number(record.POS) === 21;
+    const inAge = age >= 0.25;
+    const denominatorBase = inAge && hasBronchitisDx && hasEncounter && !isPos21;
+    const excluded =
+      hasCode(record, "G2176") ||
+      hasCode(record, "G2177") ||
+      hasCode(record, "G9712") ||
+      hasCode(record, "G9713");
+    const dosTime = toDateValue(record.DOS);
+    const qdcStatus = getQdcStatus(record);
+
+    episodeState.set(record, {
+      denominatorBase,
+      excluded,
+      dosTime,
+      qdcStatus,
+      keepEpisode: false,
+    });
+
+    if (!denominatorBase || excluded || dosTime === null) continue;
+
+    const patientKey = getPatientKey(record) || "__NO_PATIENT__";
+    if (!patientEpisodes.has(patientKey)) patientEpisodes.set(patientKey, []);
+    patientEpisodes.get(patientKey).push(record);
+  }
+
+  for (const [, patientRecords] of patientEpisodes) {
+    patientRecords.sort((a, b) => episodeState.get(a).dosTime - episodeState.get(b).dosTime);
+    let lastKeptDos = null;
+    for (const record of patientRecords) {
+      const state = episodeState.get(record);
+      if (lastKeptDos === null || dayDiff(state.dosTime, lastKeptDos) > 30) {
+        state.keepEpisode = true;
+        lastKeptDos = state.dosTime;
+      }
+    }
+  }
+
+  await bulkUpdateRecords(collection, records, (record) => {
+    const state = episodeState.get(record);
+    const denominator = state && state.denominatorBase && !state.excluded && state.keepEpisode ? 1 : 0;
+    const hasNumerator = denominator && state.qdcStatus;
+
+    return {
+      ICD116: denominator,
+      CPT116: denominator,
+      M116: denominator,
+      N116_MET: hasNumerator ? state.qdcStatus.met : 0,
+      N116_NOT_MET: hasNumerator ? state.qdcStatus.notMet : 0,
+      QDC116: hasNumerator ? state.qdcStatus.qdc : "",
     };
-    return updateData;
   });
 
   return {
@@ -23648,119 +22675,128 @@ const icdCodes116 = (record.ICD || "").split(" ");
 };
 
 exports.measure66 = async (collection, records) => {
-  const icdCodesToCompare66 = [
-    "J020",
-    "J028",
-    "J029",
-    "J0300",
-    "J0301",
-    "J0380",
-    "J0381",
-    "J0390",
-    "J0391",
+  const pharyngitisDiagnosisCodes = [
+    "J020", "J028", "J029", "J0300", "J0301", "J0380", "J0381", "J0390", "J0391",
+  ];
+  const denominatorEncounterCodes = [
+    "98000", "98001", "98002", "98003", "98004", "98005", "98006", "98007", "98008",
+    "98009", "98010", "98011", "98012", "98013", "98014", "98015", "98016",
+    "98966", "98967", "98968", "98979", "99202", "99203", "99204", "99205",
+    "99212", "99213", "99214", "99215", "99221", "99222", "99223", "99238", "99239",
+    "99242", "99243", "99244", "99245", "99281", "99282", "99283", "99284", "99285",
+    "99341", "99342", "99344", "99345", "99347", "99348", "99349", "99350",
+    "99382", "99383", "99384", "99385", "99386", "99387", "99392", "99393", "99394",
+    "99395", "99396", "99397", "99421", "99422", "99423", "99457", "99470",
+    "98980", "G2250", "G2251", "G2252",
   ];
 
-  const cptCodesToCompare66 = [
-    "98966",
-    "98967",
-    "98968",
-    "99202",
-    "99203",
-    "99204",
-    "99205",
-    "99212",
-    "99213",
-    "99214",
-    "99215",
-    "99221",
-    "99222",
-    "99223",
-    "99238",
-    "99239",
-    "99242",
-    "99243",
-    "99244",
-    "99245",
-    "99281",
-    "99282",
-    "99283",
-    "99284",
-    "99285",
-    "99341",
-    "99342",
-    "99344",
-    "99345",
-    "99347",
-    "99348",
-    "99349",
-    "99350",
-    "99382",
-    "99383",
-    "99384",
-    "99385",
-    "99386",
-    "99387",
-    "99392",
-    "99393",
-    "99394",
-    "99395",
-    "99396",
-    "99397",
-    "99421",
-    "99422",
-    "99423",
-    "99457",
-    "98980",
-    "G2250",
-    "G2251",
-    "G2252",
-  ];
+  const splitCodes = (value) => String(value || "").trim().split(/\s+/).filter(Boolean);
+  const normalizeCode = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const getPatientKey = (record) => {
+    const raw =
+      record["PAT ID"] ??
+      record["PATID"] ??
+      record["PATIENT ID"] ??
+      record["Patient ID"] ??
+      record["MRN"] ??
+      record["MEMBER ID"] ??
+      record["Member ID"] ??
+      record["PATIENT"];
+    return raw === undefined || raw === null || String(raw).trim() === "" ? String(record._id) : String(raw).trim();
+  };
+  const hasCode = (record, code) => {
+    const target = normalizeCode(code);
+    const tokens = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS), ...splitCodes(record.ICD)];
+    return tokens.some((token) => normalizeCode(token) === target);
+  };
+  const toDateValue = (dosValue) => {
+    const raw = String(dosValue || "").trim();
+    if (!raw) return null;
+    const date = new Date(raw);
+    if (!Number.isNaN(date.getTime())) return date.getTime();
+    const digits = raw.replace(/\D/g, "");
+    if (digits.length === 8) {
+      const yyyy = Number(digits.slice(0, 4));
+      const mm = Number(digits.slice(4, 6));
+      const dd = Number(digits.slice(6, 8));
+      const parsed = new Date(yyyy, mm - 1, dd).getTime();
+      return Number.isNaN(parsed) ? null : parsed;
+    }
+    return null;
+  };
+  const dayDiff = (a, b) => Math.floor(Math.abs(a - b) / (24 * 60 * 60 * 1000));
+  const has3210F8P = (record) => {
+    if (hasCode(record, "3210F8P")) return true;
+    if (!hasCode(record, "3210F")) return false;
+    return splitCodes(record.MOD).some((mod) => normalizeCode(mod) === "8P");
+  };
+  const getQdcStatus = (record) => {
+    if (has3210F8P(record)) return { qdc: "3210F8P", met: 0, notMet: 1 };
+    if (hasCode(record, "3210F")) return { qdc: "3210F", met: 1, notMet: 0 };
+    return null;
+  };
+
+  const episodeState = new WeakMap();
+  const patientEpisodes = new Map();
+
+  for (const record of records) {
+    const age = Number(record.AGE);
+    const icdCodes = splitCodes(record.ICD).map((code) => normalizeCode(code));
+    const cptCodes = splitCodes(record.CPT).map((code) => normalizeCode(code));
+    const hasPharyngitisDx = icdCodes.some((code) => pharyngitisDiagnosisCodes.includes(code));
+    const hasEncounter = cptCodes.some((code) => denominatorEncounterCodes.includes(code));
+    const isPos21 = Number(record.POS) === 21;
+    const hasAntibioticOrder = hasCode(record, "G8711");
+    const denominatorBase = age >= 3 && hasPharyngitisDx && hasEncounter && !isPos21 && hasAntibioticOrder;
+    const excluded =
+      hasCode(record, "G9703") ||
+      hasCode(record, "G2175") ||
+      hasCode(record, "G2097") ||
+      hasCode(record, "G9702");
+    const dosTime = toDateValue(record.DOS);
+    const qdcStatus = getQdcStatus(record);
+
+    episodeState.set(record, {
+      denominatorBase,
+      excluded,
+      dosTime,
+      qdcStatus,
+      keepEpisode: false,
+    });
+
+    if (!denominatorBase || excluded || dosTime === null) continue;
+
+    const patientKey = getPatientKey(record) || "__NO_PATIENT__";
+    if (!patientEpisodes.has(patientKey)) patientEpisodes.set(patientKey, []);
+    patientEpisodes.get(patientKey).push(record);
+  }
+
+  for (const [, patientRecords] of patientEpisodes) {
+    patientRecords.sort((a, b) => episodeState.get(a).dosTime - episodeState.get(b).dosTime);
+    let lastKeptDos = null;
+    for (const record of patientRecords) {
+      const state = episodeState.get(record);
+      if (lastKeptDos === null || dayDiff(state.dosTime, lastKeptDos) > 30) {
+        state.keepEpisode = true;
+        lastKeptDos = state.dosTime;
+      }
+    }
+  }
 
   await bulkUpdateRecords(collection, records, (record) => {
-const icdCodes66 = (record.ICD || "").split(" ");
-    const cptCodes66 = String(record.CPT || "").split(" ");
+    const state = episodeState.get(record);
+    const denominator = state && state.denominatorBase && !state.excluded && state.keepEpisode ? 1 : 0;
+    const hasNumerator = denominator && state.qdcStatus;
 
-    const icdMatched66 = icdCodes66.filter(
-      (code) => icdCodesToCompare66.includes(code) && record.AGE >= 3
-    );
-
-    const cptMatched66 = cptCodes66.filter(
-      (code) =>
-        cptCodesToCompare66.includes(code) &&
-        record.AGE >= 3 &&
-        record.POS !== 21
-    );
-
-    const cpt1Matched66 = cptCodes66.includes("G8711") && record.AGE >= 3;
-    const cpt2Matched66 = cptCodes66.includes("G9703") && record.AGE >= 3;
-    const cpt3Matched66 = cptCodes66.includes("G2175") && record.AGE >= 3;
-    const cpt4Matched66 = cptCodes66.includes("G2097") && record.AGE >= 3;
-    const cpt5Matched66 = cptCodes66.includes("G9702") && record.AGE >= 3;
-
-    let updateData = {};
-
-    let m66;
-
-    if (
-      icdMatched66.length > 0 &&
-      cptMatched66.length > 0 &&
-      (cpt1Matched66 == false ||
-        cpt2Matched66 == false ||
-        cpt3Matched66 == false ||
-        cpt4Matched66 == false ||
-        cpt5Matched66 == false)
-    ) {
-      m66 = 1;
-    } else {
-      m66 = 0;
-    }
-
-    updateData = {
-      ICD66: icdMatched66.length > 0 ? 1 : 0,
-      CPT66: cptMatched66.length > 0 ? 1 : 0,
-      M66: m66,
+    return {
+      ICD66: denominator,
+      CPT66: denominator,
+      M66: denominator,
+      M066: denominator,
+      N066_MET: hasNumerator ? state.qdcStatus.met : 0,
+      N066_NOT_MET: hasNumerator ? state.qdcStatus.notMet : 0,
+      QDC066: hasNumerator ? state.qdcStatus.qdc : "",
     };
-    return updateData;
   });
 
   return {
@@ -23769,110 +22805,121 @@ const icdCodes66 = (record.ICD || "").split(" ");
   };
 };
 exports.measure65 = async (collection, records) => {
-  const icdCodesToCompare65 = ["J00", "J060", "J069"];
-
-  const cptCodesToCompare65 = [
-    "98966",
-    "98967",
-    "98968",
-    "99202",
-    "99203",
-    "99204",
-    "99205",
-    "99212",
-    "99213",
-    "99214",
-    "99215",
-    "99221",
-    "99222",
-    "99223",
-    "99238",
-    "99239",
-    "99281",
-    "99282",
-    "99283",
-    "99284",
-    "99285",
-    "99341",
-    "99342",
-    "99344",
-    "99345",
-    "99347",
-    "99348",
-    "99349",
-    "99350",
-    "99381",
-    "99382",
-    "99383",
-    "99384",
-    "99385",
-    "99386",
-    "99387",
-    "99391",
-    "99392",
-    "99393",
-    "99394",
-    "99395",
-    "99396",
-    "99397",
-    "99401",
-    "99402",
-    "99403",
-    "99404",
-    "99411",
-    "99412",
-    "99421",
-    "99422",
-    "99423",
-    "99441",
-    "99442",
-    "99443",
-    "99455",
-    "99456",
-    "99457",
-    "98980",
-    "G2250",
-    "G2251",
-    "G2252",
+  const uriDiagnosisCodes = ["J00", "J060", "J069"];
+  const denominatorEncounterCodes = [
+    "98000", "98001", "98002", "98003", "98004", "98005", "98006", "98007", "98008",
+    "98009", "98010", "98011", "98012", "98013", "98014", "98015", "98016",
+    "98966", "98967", "98968", "98979", "99202", "99203", "99204", "99205",
+    "99212", "99213", "99214", "99215", "99221", "99222", "99223", "99238", "99239",
+    "99281", "99282", "99283", "99284", "99285", "99341", "99342", "99344", "99345",
+    "99347", "99348", "99349", "99350", "99381", "99382", "99383", "99384", "99385",
+    "99386", "99387", "99391", "99392", "99393", "99394", "99395", "99396", "99397",
+    "99401", "99402", "99403", "99404", "99411", "99412", "99421", "99422", "99423",
+    "99455", "99456", "99457", "99470", "98980", "G2250", "G2251", "G2252",
   ];
 
-  await bulkUpdateRecords(collection, records, (record) => {
-const icdCodes65 = (record.ICD || "").split(" ");
-    const cptCodes65 = String(record.CPT || "").split(" ");
-
-    const icdMatched65 = icdCodes65.filter((code) =>
-      icdCodesToCompare65.includes(code)
-    );
-
-    const cptMatched65 = cptCodes65.filter((code) =>
-      cptCodesToCompare65.includes(code)
-    );
-
-    const cpt1Matched65 = cptCodes65.includes("G2173");
-    const cpt2Matched65 = cptCodes65.includes("G2174");
-    const cpt3Matched65 = cptCodes65.includes("G8709");
-    const cpt4Matched65 = cptCodes65.includes("G9700");
-
-    let updateData = {};
-
-    let m65;
-
-    if (
-      icdMatched65.length > 0 &&
-      cptMatched65.length > 0 &&
-      (!cpt1Matched65 || !cpt2Matched65 || !cpt3Matched65 || !cpt4Matched65)
-    ) {
-      m65 = 1;
-    } else {
-      m65 = 0;
+  const splitCodes = (value) => String(value || "").trim().split(/\s+/).filter(Boolean);
+  const normalizeCode = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const getPatientKey = (record) => {
+    const raw =
+      record["PAT ID"] ??
+      record["PATID"] ??
+      record["PATIENT ID"] ??
+      record["Patient ID"] ??
+      record["MRN"] ??
+      record["MEMBER ID"] ??
+      record["Member ID"] ??
+      record["PATIENT"];
+    return raw === undefined || raw === null || String(raw).trim() === "" ? String(record._id) : String(raw).trim();
+  };
+  const hasCode = (record, code) => {
+    const target = normalizeCode(code);
+    const tokens = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS), ...splitCodes(record.ICD)];
+    return tokens.some((token) => normalizeCode(token) === target);
+  };
+  const toDateValue = (dosValue) => {
+    const raw = String(dosValue || "").trim();
+    if (!raw) return null;
+    const date = new Date(raw);
+    if (!Number.isNaN(date.getTime())) return date.getTime();
+    const digits = raw.replace(/\D/g, "");
+    if (digits.length === 8) {
+      const yyyy = Number(digits.slice(0, 4));
+      const mm = Number(digits.slice(4, 6));
+      const dd = Number(digits.slice(6, 8));
+      const parsed = new Date(yyyy, mm - 1, dd).getTime();
+      return Number.isNaN(parsed) ? null : parsed;
     }
+    return null;
+  };
+  const dayDiff = (a, b) => Math.floor(Math.abs(a - b) / (24 * 60 * 60 * 1000));
+  const getQdcStatus = (record) => {
+    if (hasCode(record, "G8708")) return { qdc: "G8708", met: 1, notMet: 0 };
+    if (hasCode(record, "G8710")) return { qdc: "G8710", met: 0, notMet: 1 };
+    return null;
+  };
 
-    updateData = {
-      ICD65: icdMatched65.length > 0 ? 1 : 0,
-      CPT65: cptMatched65.length > 0 ? 1 : 0,
-      M65: m65,
+  const episodeState = new WeakMap();
+  const patientEpisodes = new Map();
+
+  for (const record of records) {
+    const age = Number(record.AGE);
+    const icdCodes = splitCodes(record.ICD).map((code) => normalizeCode(code));
+    const cptCodes = splitCodes(record.CPT).map((code) => normalizeCode(code));
+    const hasUriDx = icdCodes.some((code) => uriDiagnosisCodes.includes(code));
+    const hasEncounter = cptCodes.some((code) => denominatorEncounterCodes.includes(code));
+    const isPos21 = Number(record.POS) === 21;
+    const inAge = age >= 0.25;
+    const denominatorBase = inAge && hasUriDx && hasEncounter && !isPos21;
+    const excluded =
+      hasCode(record, "G2173") ||
+      hasCode(record, "G2174") ||
+      hasCode(record, "G8709") ||
+      hasCode(record, "G9700");
+    const dosTime = toDateValue(record.DOS);
+    const qdcStatus = getQdcStatus(record);
+
+    episodeState.set(record, {
+      denominatorBase,
+      excluded,
+      dosTime,
+      qdcStatus,
+      keepEpisode: false,
+    });
+
+    if (!denominatorBase || excluded || dosTime === null) continue;
+
+    const patientKey = getPatientKey(record) || "__NO_PATIENT__";
+    if (!patientEpisodes.has(patientKey)) patientEpisodes.set(patientKey, []);
+    patientEpisodes.get(patientKey).push(record);
+  }
+
+  for (const [, patientRecords] of patientEpisodes) {
+    patientRecords.sort((a, b) => episodeState.get(a).dosTime - episodeState.get(b).dosTime);
+    let lastKeptDos = null;
+    for (const record of patientRecords) {
+      const state = episodeState.get(record);
+      if (lastKeptDos === null || dayDiff(state.dosTime, lastKeptDos) > 30) {
+        state.keepEpisode = true;
+        lastKeptDos = state.dosTime;
+      }
+    }
+  }
+
+  await bulkUpdateRecords(collection, records, (record) => {
+    const state = episodeState.get(record);
+    const denominator = state && state.denominatorBase && !state.excluded && state.keepEpisode ? 1 : 0;
+    const hasNumerator = denominator && state.qdcStatus;
+
+    return {
+      ICD65: denominator,
+      CPT65: denominator,
+      M65: denominator,
+      M065: denominator,
+      N065_MET: hasNumerator ? state.qdcStatus.met : 0,
+      N065_NOT_MET: hasNumerator ? state.qdcStatus.notMet : 0,
+      QDC065: hasNumerator ? state.qdcStatus.qdc : "",
     };
-    return updateData;
   });
 
   return {
@@ -31045,63 +30092,46 @@ exports.measure24 = async (collection, records) => {
     "27248",
   ];
 
-  // for (const record of records) {
+  const hasToken = (record, token) => {
+    const codeString = `${record.CPT || ""} ${record.ICD || ""} ${record.MOD || ""}`;
+    return codeString.split(" ").includes(token);
+  };
+
   await bulkUpdateRecords(collection, records, (record) => {
-const icdCodes24C1 = (record.ICD || "").split(" ");
-    const icdCodes24C2 = (record.ICD || "").split(" ");
-    const cptCodes24C1 = (record.CPT || "").split(" ");
-    const cptCodes24C2 = (record.CPT || "").split(" ");
+    const icdCodes24 = String(record.ICD || "").split(" ");
+    const cptCodes24 = String(record.CPT || "").split(" ");
+    const inAgeRange = Number(record.AGE) >= 50;
 
-    const icdMatched24C1 = icdCodes24C1.filter(
-      (code) => icdCodesToCompare24C1.includes(code) && record.AGE >= 50
-      //(record.GEN === "M" || record.GEN === "F")
+    const icdMatched24C1 = icdCodes24.filter(
+      (code) => icdCodesToCompare24C1.includes(code) && inAgeRange
     );
-    const cptMatched24C1 = cptCodes24C1.filter(
-      (code) =>
-        cptCodesToCompare24C1.includes(code) &&
-        record.AGE >= 50 
-        // &&(record.MOD === "GQ" || record.MOD === "GT" || record.MOD === 95) &&
-        //(record.POS !== 2 || record.POS !== 10 || record.POS !== 12)
+    const icdMatched24C2 = icdCodes24.filter(
+      (code) => icdCodesToCompare24C2.includes(code) && inAgeRange
     );
-    const cpt1Matched24C1 = cptCodes24C1.filter(
-      (code) => cptCodesToCompare24C1.includes("G9688") && record.AGE >= 50
-      //(record.GEN === "M" || record.GEN === "F")
+    const cptMatched24C1 = cptCodes24.filter(
+      (code) => cptCodesToCompare24C1.includes(code) && inAgeRange
+    );
+    const cptMatched24C2 = cptCodes24.filter(
+      (code) => cptCodesToCompare24C2.includes(code) && inAgeRange
     );
 
-    
-    const icdMatched24C2 = icdCodes24C2.filter(
-      (code) => icdCodesToCompare24C2.includes(code) && record.AGE >= 50
-      //(record.GEN === "M" || record.GEN === "F")
-    );
-    const cptMatched24C2 = cptCodes24C2.filter(
-      (code) =>
-        cptCodesToCompare24C2.includes(code) &&
-        record.AGE >= 50 
-      //  && (record.MOD === "GQ" || record.MOD === "GT" || record.MOD === 95) &&
-       // (record.POS !== 2 || record.POS !== 10 || record.POS !== 12)
-    );
-    const cpt1Matched24C2 = cptCodes24C2.filter(
-      (code) => cptCodesToCompare24C2.includes("G9688") && record.AGE >= 50
-      //(record.GEN === "M" || record.GEN === "F")
-    );
+    const hospiceExcluded = hasToken(record, "G9688") && inAgeRange;
+    const denominatorMet =
+      (icdMatched24C1.length > 0 && cptMatched24C1.length > 0) ||
+      (icdMatched24C2.length > 0 && cptMatched24C2.length > 0);
+    const measureEligible = denominatorMet && !hospiceExcluded;
 
-    updateData = {
+    return {
       ICD24C1: icdMatched24C1.length > 0 ? 1 : 0,
       CPT24C1: cptMatched24C1.length > 0 ? 1 : 0,
       ICD24C2: icdMatched24C2.length > 0 ? 1 : 0,
       CPT24C2: cptMatched24C2.length > 0 ? 1 : 0,
-
-      M0024:
-        ((icdMatched24C1.length > 0 &&
-        cptMatched24C1.length > 0 &&
-        cpt1Matched24C1.length == false) || 
-        (icdMatched24C2.length > 0 &&
-          cptMatched24C2.length > 0 &&
-          cpt1Matched24C2.length == false))
-          ? 1
-          : 0,
+      E0024: measureEligible ? 0 : 1,
+      N024_MET: 0,
+      N024_NOT_MET: 0,
+      QDC024: "",
+      M0024: measureEligible ? 1 : 0,
     };
-    return updateData;
   });
 
   return {
@@ -34830,13 +33860,13 @@ exports.measure436 = async (collection, records) => {
   });
 
   await bulkUpdateRecords(collection, filteredRecords, (record) => {
-    const cptCodes357 = String(record.CPT || record.cpt || "")
+    const cptCodes436 = String(record.CPT || record.cpt || "")
       .trim()
       .split(/\s+/);
 
-    const cptMatched357 = cptCodes357.filter(
+    const cptMatched436 = cptCodes436.filter(
       (code) =>
-        cptCodesToCompare357.includes(code) &&
+        cptCodesToCompare436.includes(code) &&
         record.AGE >= 18 &&
         (record.MOD !== "GQ" || record.MOD !== "GT" || record.MOD !== 95) &&
         (record.POS !== 2 || record.POS !== 10)
@@ -34844,16 +33874,16 @@ exports.measure436 = async (collection, records) => {
 
     let updateData = {};
 
-    let m357;
+    let m436;
 
-    if (cptMatched357.length > 0) {
-      m357 = 1;
+    if (cptMatched436.length > 0) {
+      m436 = 1;
     } else {
-      m357 = 0;
+      m436 = 0;
     }
     updateData = {
-      CPT357: cptMatched357.length > 0 ? 1 : 0,
-      M00357: m357,
+      CPT436: cptMatched436.length > 0 ? 1 : 0,
+      M436: m436,
     };
     return updateData;
   });
@@ -35074,4 +34104,5 @@ const icd1Codes440 = (record.ICD || "").split(" ");
 };
 
 // measure999 and M999 references removed as test measure is no longer needed
+
 

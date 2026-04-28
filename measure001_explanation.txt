@@ -1,0 +1,43 @@
+Measure 001 (Diabetes: Glycemic Status Assessment >9%) - Implementation Notes
+
+Source reference:
+- 2026_Measure_001_MIPSCQM.pdf
+
+What this code now does (denominator-focused):
+1) Age check:
+   - Includes only patients age 18 through 75.
+   - Implemented with: AGE >= 18 and AGE <= 75.
+
+2) Diagnosis check (ICD):
+   - Matches diabetes ICD-10 code list defined in measure 001.
+   - Record is considered diagnosis-qualified when at least one ICD code matches.
+
+3) Encounter check (CPT/HCPCS):
+   - Matches allowed denominator encounter codes (CPT/HCPCS) from measure 001.
+   - Record is encounter-qualified when at least one encounter code matches.
+
+4) Denominator exclusions:
+   - Exclusion (any age): G9687, G9988
+   - Exclusion (age >= 66 only): G2081, G2090, G2091
+   - If any applicable exclusion is present, record is excluded from denominator.
+
+5) Denominator eligibility:
+   - Denominator met when BOTH are true:
+     a) Diabetes ICD matched
+     b) Encounter CPT/HCPCS matched
+     c) No applicable denominator exclusion
+   - Output mapping:
+     - ICD1 = 1 if diagnosis matched, else 0
+     - CPT1 = 1 if encounter matched, else 0
+     - M001 = 1 if denominator eligible, else 0
+     - E001 = 0 if eligible, else 1
+
+Numerator handling:
+- Numerator logic intentionally removed for this measure.
+- These fields are intentionally neutralized:
+  - N001_MET = 0
+  - N001_NOT_MET = 0
+  - QDC001 = ""
+
+PDF alignment summary:
+- Measure 001 denominator exclusions are now applied in code for the requested exclusion codes.
