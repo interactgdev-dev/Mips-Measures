@@ -650,8 +650,8 @@ async function bulkUpdateRecords(collection, records, processRecordFn) {
   }
 }
 
-exports.measure1 = async (collection, records) => {
-  const icdCodesToCompare1 = [
+const measure001DiabetesGlycemicStatus = async (collection, records) => {
+  const ct1DiabetesIcdCodes = [
   "E10A2", "E1010", "E1011", "E1021", "E1022", "E1029", "E10311", "E10319", 
   "E103211", "E103212", "E103213", "E103219", "E103291", "E103292", "E103293", "E103299", "E103311", "E103312", 
   "E103313", "E103319", "E103391", "E103392", "E103393", "E103399", "E103411", "E103412", "E103413", "E103419", 
@@ -680,46 +680,58 @@ exports.measure1 = async (collection, records) => {
   "O24113", "O24119", "O2412", "O2413", "O24311", "O24312", "O24313", "O24319", "O2432", "O2433", "O24811", 
   "O24812", "O24813", "O24819", "O2482", "O2483"
   ];
-  const cptCodesToCompare1 = [
+  const ct1EncounterCptHcpcsCodes = [
      "97802", "97803", "97804", "98000", "98001", 
   "98002", "98003", "98004", "98005", "98006", "98007", "98008", "98009", "98010", "98011", "98012", "98013", "98014", "98015", 
   "98016", "99202", "99203", "99204", "99205", "99212", "99213", "99214", "99215", "99341", "99342", "99344", "99345", "99347", 
   "99348", "99349", "99350", "99385", "99386", "99387", "99395", "99396", "99397", "G0270", "G0271", "G0402", "G0438", 
   "G0439"
   ];
-  const denominatorExclusionCodes1 = ["G9687", "G9988"];
-  const denominatorExclusionCodes66Plus1 = ["G2081", "G2090", "G2091"];
+  const ct1DenominatorExclusionAnyAgeCodes = ["G9687", "G9988"];
+  const ct1DenominatorExclusion66PlusCodes = ["G2081", "G2090", "G2091"];
   
   await bulkUpdateRecords(collection, records, (record) => {
-    const icdCodes1 = String(record.ICD || "").split(" ");
-    const cptCodes1 = String(record.CPT || "").split(" ");
-    const age = Number(record.AGE);
-    const inAgeRange = age >= 18 && age <= 75;
+    const ct1RecordIcdCodes = String(record.ICD || "").split(" ");
+    const ct1RecordCptCodes = String(record.CPT || "").split(" ");
+    const ct1Age = Number(record.AGE);
+    const ct1AgeEligible = ct1Age >= 18 && ct1Age <= 75;
 
-    const icdMatched1 = icdCodes1.filter((code) => icdCodesToCompare1.includes(code) && inAgeRange);
-    const cptMatched1 = cptCodes1.filter((code) => cptCodesToCompare1.includes(code) && inAgeRange);
-    const hasExclusionAnyAge = cptCodes1.some((code) => denominatorExclusionCodes1.includes(code));
-    const hasExclusion66Plus =
-      age >= 66 && cptCodes1.some((code) => denominatorExclusionCodes66Plus1.includes(code));
-    const denominatorExcluded = hasExclusionAnyAge || hasExclusion66Plus;
-    const measureEligible = icdMatched1.length > 0 && cptMatched1.length > 0 && !denominatorExcluded;
+    const ct1MatchedDiabetesIcdCodes = ct1RecordIcdCodes.filter(
+      (code) => ct1DiabetesIcdCodes.includes(code) && ct1AgeEligible
+    );
+    const ct1MatchedEncounterCodes = ct1RecordCptCodes.filter(
+      (code) => ct1EncounterCptHcpcsCodes.includes(code) && ct1AgeEligible
+    );
+    const ct1HasDenominatorExclusionAnyAge = ct1RecordCptCodes.some(
+      (code) => ct1DenominatorExclusionAnyAgeCodes.includes(code)
+    );
+    const ct1HasDenominatorExclusion66Plus =
+      ct1Age >= 66 &&
+      ct1RecordCptCodes.some((code) => ct1DenominatorExclusion66PlusCodes.includes(code));
+    const ct1DenominatorExcluded =
+      ct1HasDenominatorExclusionAnyAge || ct1HasDenominatorExclusion66Plus;
+    const ct1DenominatorMet =
+      ct1MatchedDiabetesIcdCodes.length > 0 &&
+      ct1MatchedEncounterCodes.length > 0 &&
+      !ct1DenominatorExcluded;
 
     return {
-      ICD1: icdMatched1.length > 0 ? 1 : 0,
-      CPT1: cptMatched1.length > 0 ? 1 : 0,
-      E001: measureEligible ? 0 : 1,
+      ICD1: ct1MatchedDiabetesIcdCodes.length > 0 ? 1 : 0,
+      CPT1: ct1MatchedEncounterCodes.length > 0 ? 1 : 0,
+      E001: ct1DenominatorMet ? 0 : 1,
       N001_MET: 0,
       N001_NOT_MET: 0,
       QDC001: "",
-      M001: measureEligible ? 1 : 0,
+      M001: ct1DenominatorMet ? 1 : 0,
     };
   });
   return {
     message: "Measure 1 processed successfully",
     totalRecords: records.length,
   };
-  // }
 };
+exports.measure001DiabetesGlycemicStatus = measure001DiabetesGlycemicStatus;
+exports.measure1 = measure001DiabetesGlycemicStatus;
 exports.measure5 = async (collection, records) => {
   const hfIcdCodes = [
     "I110", "I130", "I132", "I501", "I5020", "I5021", "I5022", "I5023", "I5030",

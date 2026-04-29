@@ -20,7 +20,7 @@ const fsPromises = require("fs").promises;
 const app = express();
 
 const cors = require("cors");
-const Measures = require("./utils/processing");
+const Measures = require("./utils/processing_2026");
 const morgan = require("morgan");
 app.use(
   morgan(":method :url :status :res[content-length] - :response-time ms")
@@ -191,6 +191,7 @@ let functionMapping = {
   M047: "measure47",
   M048: "measure48",
   M050: "measure50",
+  M052: "measure52",
   M065: "measure65",
   M066: "measure66",
   M116: "measure116",
