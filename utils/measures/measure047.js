@@ -1,6 +1,7 @@
 const bulkUpdateRecords = require("./helpers/bulkUpdateRecords");
 
 const measure047 = async (collection, records) => {
+  // CT1 - Qualifying denominator encounters.
   const denominatorEncounterCodes = [
     "90791", "90792", "90832", "90834", "90837", "90839", "90845", "90846", "90847",
     "96116", "96130", "96132", "96110", "96112", "96156", "96105", "96125",
@@ -40,6 +41,7 @@ const measure047 = async (collection, records) => {
     const patientKey = getPatientKey(record);
     if (!patientKey) continue;
 
+    // CT1 - Base denominator filters.
     const age = Number(record.AGE);
     const cptCodes = splitCodes(record.CPT);
     const hasEncounter = cptCodes.some((code) => denominatorEncounterCodes.includes(code));
@@ -52,6 +54,7 @@ const measure047 = async (collection, records) => {
 
     const state = patientState.get(patientKey);
     state.hasDenominator = state.hasDenominator || isEligibleEncounter;
+    // CT2 - Patient-level denominator exclusion.
     state.excluded = state.excluded || (isEligibleEncounter && hasCode(record, "G9692"));
   }
 
@@ -61,6 +64,7 @@ const measure047 = async (collection, records) => {
     const patientKey = getPatientKey(record);
     const state = patientState.get(patientKey);
     const shouldIncludePatient = !!(state && state.hasDenominator && !state.excluded);
+    // Final denominator-only assignment (single episode per patient).
     const denominator = shouldIncludePatient && !emittedPatients.has(patientKey) ? 1 : 0;
     if (denominator) emittedPatients.add(patientKey);
 

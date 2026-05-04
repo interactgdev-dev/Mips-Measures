@@ -1,6 +1,7 @@
 const bulkUpdateRecords = require("./helpers/bulkUpdateRecords");
 
 const measure039 = async (collection, records) => {
+  // CT1 - Qualifying denominator encounters.
   const denominatorEncounterCodes = [
     "98000", "98001", "98002", "98003", "98004", "98005", "98006", "98007", "98008",
     "98009", "98010", "98011", "98012", "98013", "98014", "98015", "98016",
@@ -40,6 +41,7 @@ const measure039 = async (collection, records) => {
     const patientKey = getPatientKey(record);
     if (!patientKey) continue;
 
+    // CT1 - Base denominator filters.
     const age = Number(record.AGE);
     const isFemale = String(record.GEN || "").toUpperCase() === "F";
     const cptCodes = splitCodes(record.CPT);
@@ -52,6 +54,7 @@ const measure039 = async (collection, records) => {
 
     const state = patientState.get(patientKey);
     state.hasDenominator = state.hasDenominator || inDenominator;
+    // CT2 - Patient-level denominator exclusions.
     state.excluded =
       state.excluded ||
       (inDenominator &&
@@ -62,6 +65,7 @@ const measure039 = async (collection, records) => {
   for (const record of records) {
     const patientKey = getPatientKey(record);
     const state = patientState.get(patientKey);
+    // Final denominator-only assignment.
     const denominator = state && state.hasDenominator && !state.excluded ? 1 : 0;
     updatesByRecord.set(record, {
       CPT39: denominator,

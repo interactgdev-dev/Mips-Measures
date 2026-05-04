@@ -1,10 +1,12 @@
 const bulkUpdateRecords = require("./helpers/bulkUpdateRecords");
 
 const measure052CopdActionPlan = async (collection, records) => {
+  // CT1 - COPD diagnosis value set.
   const copdDiagnosisCodes = [
     "J410", "J411", "J418", "J42", "J430", "J431", "J432", "J438", "J439",
     "J440", "J441", "J4489", "J449",
   ];
+  // CT2 - Qualifying denominator encounters.
   const encounterCodes = [
     "99202", "99203", "99204", "99205", "99212", "99213", "99214", "99215", "99424", "99426",
   ];
@@ -34,6 +36,7 @@ const measure052CopdActionPlan = async (collection, records) => {
     const patientKey = getPatientKey(record);
     if (!patientKey) continue;
 
+    // CT1/CT2 - Base denominator checks.
     const age = Number(record.AGE);
     const icdCodes = splitCodes(record.ICD).map((code) => normalizeCode(code));
     const cptCodes = splitCodes(record.CPT).map((code) => normalizeCode(code));
@@ -41,6 +44,7 @@ const measure052CopdActionPlan = async (collection, records) => {
     const hasEncounter = cptCodes.some((code) => encounterCodes.includes(code));
     const telehealthEncounter = hasCode(record, "M1426");
     const c1DenominatorHit = age >= 18 && hasCopdDx && hasEncounter && !telehealthEncounter;
+    // CT3 - Additional denominator pathway criteria.
     const c2DenominatorHit = c1DenominatorHit && hasCode(record, "G8924") && hasCode(record, "M1218");
 
     if (!patientState.has(patientKey)) {

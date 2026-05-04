@@ -1,6 +1,7 @@
 const bulkUpdateRecords = require("./helpers/bulkUpdateRecords");
 
 const measure118CoronaryArteryDisease = async (collection, records) => {
+  // CT1 - CAD diagnosis and encounter value sets (criteria path 1 and 2).
   const icdCodesToCompare118C1 = [
     "I200","I201","I202","I2089","I209","I2101","I2102","I2109","I2111","I2119","I2121","I2129","I213","I214","I219",
     "I21A9","I240","I2489","I249","I2510","I25110","I25111","I25112","I25118","I25119","I252","I255","I256",
@@ -38,6 +39,7 @@ const measure118CoronaryArteryDisease = async (collection, records) => {
   const cptCodesToCompare118C22 = [...cptCodesToCompare118C11];
 
   await bulkUpdateRecords(collection, records, (record) => {
+    // CT1/CT2 - Evaluate denominator matching for both measure pathways.
     const icdCodes118C1 = (record.ICD || "").split(" ");
     const icdCodes118C21 = (record.ICD || "").split(" ");
     const icdCodes118C22 = (record.ICD || "").split(" ");
@@ -70,6 +72,7 @@ const measure118CoronaryArteryDisease = async (collection, records) => {
       (code) => cptCodesToCompare118C22.includes(code) && record.AGE >= 18
     );
 
+    // Denominator-style flags and final measure assignment.
     return {
       ICD118C1: icdMatched118C1.length > 0 ? 1 : 0,
       CPT118C11: cptMatched118C11.length > 0 ? 1 : 0,

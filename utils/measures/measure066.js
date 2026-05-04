@@ -1,9 +1,11 @@
 const bulkUpdateRecords = require("./helpers/bulkUpdateRecords");
 
 const measure066AppropriateTestingPharyngitis = async (collection, records) => {
+  // CT1 - Pharyngitis diagnosis value set.
   const pharyngitisDiagnosisCodes = [
     "J020", "J028", "J029", "J0300", "J0301", "J0380", "J0381", "J0390", "J0391",
   ];
+  // CT2 - Qualifying denominator encounters.
   const denominatorEncounterCodes = [
     "98000", "98001", "98002", "98003", "98004", "98005", "98006", "98007", "98008",
     "98009", "98010", "98011", "98012", "98013", "98014", "98015", "98016",
@@ -55,6 +57,7 @@ const measure066AppropriateTestingPharyngitis = async (collection, records) => {
   const patientEpisodes = new Map();
 
   for (const record of records) {
+    // CT1/CT2 - Base denominator checks.
     const age = Number(record.AGE);
     const icdCodes = splitCodes(record.ICD).map((code) => normalizeCode(code));
     const cptCodes = splitCodes(record.CPT).map((code) => normalizeCode(code));
@@ -63,6 +66,7 @@ const measure066AppropriateTestingPharyngitis = async (collection, records) => {
     const isPos21 = Number(record.POS) === 21;
     const hasAntibioticOrder = hasCode(record, "G8711");
     const denominatorBase = age >= 3 && hasPharyngitisDx && hasEncounter && !isPos21 && hasAntibioticOrder;
+    // CT3 - Denominator exclusions.
     const excluded =
       hasCode(record, "G9703") ||
       hasCode(record, "G2175") ||
@@ -84,6 +88,7 @@ const measure066AppropriateTestingPharyngitis = async (collection, records) => {
   }
 
   for (const [, patientRecords] of patientEpisodes) {
+    // CT4 - Episode deduplication: keep one eligible encounter per 30-day window.
     patientRecords.sort((a, b) => episodeState.get(a).dosTime - episodeState.get(b).dosTime);
     let lastKeptDos = null;
     for (const record of patientRecords) {
@@ -97,12 +102,12 @@ const measure066AppropriateTestingPharyngitis = async (collection, records) => {
 
   await bulkUpdateRecords(collection, records, (record) => {
     const state = episodeState.get(record);
+    // Final denominator-only assignment.
     const denominator = state && state.denominatorBase && !state.excluded && state.keepEpisode ? 1 : 0;
 
     return {
       ICD66: denominator,
       CPT66: denominator,
-      M66: denominator,
       M066: denominator,
       N066_MET: 0,
       N066_NOT_MET: 0,

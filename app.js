@@ -203,6 +203,9 @@ let functionMapping = {
   M134: "measure134",
   M137: "measure137",
   M141: "measure141",
+  M143: "measure143",
+  M144: "measure144",
+  M145: "measure145",
   M155: "measure155",
   M177: "measure177",
   M176: "measure176",
@@ -222,14 +225,15 @@ let functionMapping = {
   M226: "measure226",
   M236: "measure236",
   M238: "measure238",
+  M243: "measure243",
   M249: "measure249",
   M250: "measure250",
   M268: "measure268",
+  M277: "measure277",
   M279: "measure279",
   M282: "measure282",
   M286: "measure286",
   M288: "measure288",
-  M290: "measure290",
   M291: "measure291",
   M293: "measure293",
   M317: "measure317",
@@ -779,7 +783,7 @@ function processExcelData(updateRecords, uploadHeaders = [], selectedMeasures = 
     }
 
     for (const key in record) {
-      if (key.startsWith("M") && key !== "MOD") {
+      if (/^M\d+$/i.test(key)) {
         if (!columnCounts[key]) columnCounts[key] = 0;
         if (record[key] == 1) {
           columnCounts[key]++;
@@ -1062,7 +1066,7 @@ async function generateExcelFileStreaming(collection, uploadHeaders, recordField
       }
       // counts
       for (const key in doc) {
-        if (key.startsWith('M') && key !== 'MOD') {
+        if (/^M\d+$/i.test(key)) {
           if (!columnCounts[key]) columnCounts[key] = 0;
           if (doc[key] == 1) columnCounts[key]++;
         }

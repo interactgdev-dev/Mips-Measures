@@ -1,6 +1,7 @@
 const bulkUpdateRecords = require("./helpers/bulkUpdateRecords");
 
 const measure117DiabetesEyeExam = async (collection, records) => {
+  // CT1 - Diabetes diagnosis value set.
   const icdCodesToCompare117 = [
     "E1010", "E1011", "E1021", "E1022", "E1029", "E10311", "E10319", "E103211", "E103212", "E103213",
     "E103219", "E103291", "E103292", "E103293", "E103299", "E103311", "E103312", "E103313", "E103319",
@@ -32,6 +33,7 @@ const measure117DiabetesEyeExam = async (collection, records) => {
     "O24113", "O24119", "O2412", "O2413", "O24311", "O24312", "O24313", "O24319", "O2432", "O2433", "O24811",
     "O24812", "O24813", "O24819", "O2482", "O2483",
   ];
+  // CT2 - Qualifying denominator encounter value set.
   const cptCodesToCompare117 = [
     "92002", "92004", "92012", "92014",
     "98000", "98001", "98002", "98003", "98004", "98005", "98006", "98007", "98008",
@@ -67,6 +69,7 @@ const measure117DiabetesEyeExam = async (collection, records) => {
     const patientKey = getPatientKey(record);
     if (!patientKey) continue;
 
+    // CT1/CT2 - Base denominator checks.
     const age = Number(record.AGE);
     const icdCodes117 = splitCodes(record.ICD).map((code) => normalizeCode(code));
     const cptCodes117 = splitCodes(record.CPT).map((code) => normalizeCode(code));
@@ -84,6 +87,7 @@ const measure117DiabetesEyeExam = async (collection, records) => {
     const state = patientState.get(patientKey);
     state.hasDenominator = state.hasDenominator || inBaseDenominator;
 
+    // CT3 - Denominator exclusions.
     const exclusion =
       (inBaseDenominator && hasCode(record, "G9714")) ||
       (inBaseDenominator && hasCode(record, "G9994")) ||
@@ -98,6 +102,7 @@ const measure117DiabetesEyeExam = async (collection, records) => {
   for (const record of records) {
     const patientKey = getPatientKey(record);
     const state = patientState.get(patientKey);
+    // Final denominator-only assignment.
     const denominator = state && state.hasDenominator && !state.excluded ? 1 : 0;
 
     updatesByRecord.set(record, {

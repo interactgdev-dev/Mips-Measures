@@ -1,10 +1,12 @@
 const bulkUpdateRecords = require("./helpers/bulkUpdateRecords");
 
 const measure050UrinaryIncontinencePlanOfCare = async (collection, records) => {
+  // CT1 - Urinary incontinence diagnosis value set.
   const denominatorDiagnosisCodes = [
     "F980", "N393", "N3941", "N3942", "N3943", "N3944", "N3945",
     "N3946", "N39490", "N39491", "N39492", "N39498", "R32",
   ];
+  // CT2 - Qualifying denominator encounter value set.
   const denominatorEncounterCodes = [
     "97161", "97162", "97163", "97164", "97165", "97166", "97167", "97168",
     "98000", "98001", "98002", "98003", "98004", "98005", "98006", "98007", "98008",
@@ -39,6 +41,7 @@ const measure050UrinaryIncontinencePlanOfCare = async (collection, records) => {
     const patientKey = getPatientKey(record);
     if (!patientKey) continue;
 
+    // CT1/CT2 - Base denominator filters.
     const age = Number(record.AGE);
     const isFemale = String(record.GEN || "").toUpperCase() === "F";
     const icdCodes = splitCodes(record.ICD).map((code) => normalizeCode(code));
@@ -56,6 +59,7 @@ const measure050UrinaryIncontinencePlanOfCare = async (collection, records) => {
 
     const state = patientState.get(patientKey);
     state.hasDenominator = state.hasDenominator || inDenominator;
+    // CT3 - Denominator exclusion.
     state.excluded = state.excluded || (inDenominator && hasCode(record, "G9694"));
   }
 
@@ -63,6 +67,7 @@ const measure050UrinaryIncontinencePlanOfCare = async (collection, records) => {
   for (const record of records) {
     const patientKey = getPatientKey(record);
     const state = patientState.get(patientKey);
+    // Final denominator-only assignment.
     const denominator = state && state.hasDenominator && !state.excluded ? 1 : 0;
 
     updatesByRecord.set(record, {

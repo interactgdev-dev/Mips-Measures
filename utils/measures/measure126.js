@@ -1,6 +1,7 @@
 const bulkUpdateRecords = require("./helpers/bulkUpdateRecords");
 
 const measure126DiabetesFootExam = async (collection, records) => {
+  // CT1 - Qualifying denominator encounters.
   const denominatorEncounterCodes = [
     "11042","11043","11044","11055","11056","11057","11719","11720","11721","11730","11740",
     "97161","97162","97163","97164","97597","97802","97803",
@@ -41,8 +42,10 @@ const measure126DiabetesFootExam = async (collection, records) => {
     const patientKey = getPatientKey(record);
     if (!patientKey) continue;
 
+    // CT1 - Base denominator checks.
     const age = Number(record.AGE);
     const inBaseDenominator = age >= 18 && hasDiabetesDx(record) && hasEncounter(record);
+    // CT2 - Telehealth and denominator exclusion checks.
     const telehealthEncounter = hasCode(record, "M1426");
     const denominatorExclusion = hasCode(record, "G2178");
 
@@ -67,6 +70,7 @@ const measure126DiabetesFootExam = async (collection, records) => {
   const updatesByRecord = new WeakMap();
   for (const record of records) {
     const state = patientState.get(getPatientKey(record));
+    // Final denominator-only assignment.
     const inDenominator =
       !!state &&
       state.ageEligible &&

@@ -46,7 +46,6 @@ const measure001DiabetesGlycemicStatus = async (collection, records) => {
   const ct2DenominatorExclusion66PlusCodes = ["G2081", "G2090", "G2091"];
 
   await bulkUpdateRecords(collection, records, (record) => {
-    // Clean and normalize incoming codes
     const ct1RecordIcdCodes = String(record.ICD || "")
       .replace(/\./g, "")
       .split(" ")

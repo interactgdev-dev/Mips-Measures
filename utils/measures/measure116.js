@@ -1,9 +1,11 @@
 const bulkUpdateRecords = require("./helpers/bulkUpdateRecords");
 
 const measure116AvoidanceAntibioticAcuteBronchitis = async (collection, records) => {
+  // CT1 - Acute bronchitis diagnosis value set.
   const bronchitisDiagnosisCodes = [
     "J203", "J204", "J205", "J206", "J207", "J208", "J209", "J210", "J211", "J218", "J219",
   ];
+  // CT2 - Qualifying denominator encounters.
   const denominatorEncounterCodes = [
     "98000", "98001", "98002", "98003", "98004", "98005", "98006", "98007", "98008",
     "98009", "98010", "98011", "98012", "98013", "98014", "98015", "98016",
@@ -57,6 +59,7 @@ const measure116AvoidanceAntibioticAcuteBronchitis = async (collection, records)
   const patientEpisodes = new Map();
 
   for (const record of records) {
+    // CT1/CT2 - Base denominator checks.
     const age = Number(record.AGE);
     const icdCodes = splitCodes(record.ICD).map((code) => normalizeCode(code));
     const cptCodes = splitCodes(record.CPT).map((code) => normalizeCode(code));
@@ -65,6 +68,7 @@ const measure116AvoidanceAntibioticAcuteBronchitis = async (collection, records)
     const isPos21 = Number(record.POS) === 21;
     const inAge = age >= 0.25;
     const denominatorBase = inAge && hasBronchitisDx && hasEncounter && !isPos21;
+    // CT3 - Denominator exclusions.
     const excluded =
       hasCode(record, "G2176") ||
       hasCode(record, "G2177") ||
@@ -86,6 +90,7 @@ const measure116AvoidanceAntibioticAcuteBronchitis = async (collection, records)
   }
 
   for (const [, patientRecords] of patientEpisodes) {
+    // CT4 - Episode deduplication: keep one eligible encounter per 30-day window.
     patientRecords.sort((a, b) => episodeState.get(a).dosTime - episodeState.get(b).dosTime);
     let lastKeptDos = null;
     for (const record of patientRecords) {
@@ -99,6 +104,7 @@ const measure116AvoidanceAntibioticAcuteBronchitis = async (collection, records)
 
   await bulkUpdateRecords(collection, records, (record) => {
     const state = episodeState.get(record);
+    // Final denominator-only assignment.
     const denominator = state && state.denominatorBase && !state.excluded && state.keepEpisode ? 1 : 0;
 
     return {
