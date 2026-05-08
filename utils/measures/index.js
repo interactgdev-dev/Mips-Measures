@@ -50,6 +50,14 @@ const measure282 = require("./measure282");
 const measure286 = require("./measure286");
 const measure288 = require("./measure288");
 const measure291 = require("./measure291");
+const measure293 = require("./measure293");
+const measure317 = require("./measure317");
+const measure320 = require("./measure320");
+const measure326 = require("./measure326");
+const measure331 = require("./measure331");
+const measure332 = require("./measure332");
+const measure338 = require("./measure338");
+const measure350 = require("./measure350");
 
 module.exports = {
   ...measure001,
@@ -104,4 +112,12 @@ module.exports = {
   ...measure286,
   ...measure288,
   ...measure291,
+  ...measure293,
+  ...measure317,
+  ...measure320,
+  ...measure326,
+  ...measure331,
+  ...measure332,
+  ...measure338,
+  ...measure350,
 };
