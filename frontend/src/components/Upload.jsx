@@ -5,17 +5,16 @@ import {
   Typography,
   Snackbar,
   Alert,
-  FormGroup,
   Checkbox,
   FormControlLabel,
   CircularProgress,
-  Grid,
   Paper,
-  InputAdornment,
-  TextField,
+  Divider,
+  Stack,
 } from "@mui/material";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import axios from "axios";
+import PageShell from "./PageShell";
 
 const Upload = () => {
   const [file, setFile] = useState(null);
@@ -395,91 +394,146 @@ const Upload = () => {
     return `${(bytesPerSecond / (1024 * 1024)).toFixed(2)} MB/s`;
   };
 
+  const measureCheckSx = {
+    m: 0,
+    mx: 0,
+    pr: 0.5,
+    minHeight: 32,
+    alignItems: "center",
+    "& .MuiCheckbox-root": { padding: "6px" },
+    "& .MuiFormControlLabel-label": {
+      fontSize: "0.8125rem",
+      fontWeight: 600,
+      lineHeight: 1.25,
+    },
+  };
+
   return (
-    <Box sx={{ padding: "20px", maxWidth: "900px", margin: "50px auto" }}>
-      <Paper elevation={3} sx={{ padding: "30px" }}>
-        <Typography
-          variant="h4"
-          gutterBottom
-          align="center"
-          sx={{ fontWeight: "bold", color: "#1976d2" }}
-        >
-          Select Measures
-        </Typography>
+    <PageShell maxWidth="md">
+      <Paper
+        elevation={0}
+        sx={{
+          p: { xs: 1.5, sm: 2 },
+          borderRadius: 3,
+          border: "1px solid",
+          borderColor: "divider",
+          boxShadow: "0 12px 40px rgba(15, 23, 42, 0.06)",
+        }}
+      >
+        <Stack direction="row" justifyContent="space-between" alignItems="baseline" flexWrap="wrap" gap={1} sx={{ mb: 1.5 }}>
+          <Typography variant="h5" component="h1" sx={{ color: "primary.main", fontWeight: 700 }}>
+            Quality Measures 2026
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+            {selectedColumns.length} selected
+          </Typography>
+        </Stack>
 
         <Box
           sx={{
-            maxHeight: "200px",
-            overflowY: "auto",
-            border: "1px solid #ddd",
-            borderRadius: "8px",
-            padding: "10px",
-            mb: 4,
+            border: "1px solid",
+            borderColor: "divider",
+            borderRadius: 2,
+            bgcolor: (theme) => theme.palette.grey[50],
+            p: { xs: 1, sm: 1.25 },
+            display: "flex",
+            flexDirection: "column",
+            gap: 1.25,
           }}
         >
-          <FormGroup row>
-            {checkboxes.map((num) => (
-              <FormControlLabel
-                key={num}
-                control={
-                  <Checkbox
-                    checked={selectedColumns.includes(num)}
-                    onChange={() => handleCheckboxChange(num)}
-                    sx={{ color: "#1976d2" }}
-                  />
-                }
-                label={<Typography sx={{ fontSize: "14px" }}>{num}</Typography>}
-              />
-            ))}
-          </FormGroup>
-        </Box>
-
-        <Box sx={{ textAlign: "center", mb: 4 }}>
-          <Typography variant="h4" sx={{ marginBottom: 2 }}>
-            Upload Your File
-          </Typography>
-
-          <input
-            type="file"
-            onChange={handleFileChange}
-            style={{ display: "none" }}
-            id="file-upload"
-          />
-          <label htmlFor="file-upload">
-            <Button
-              variant="contained"
-              component="span"
-              color="primary"
-              startIcon={<CloudUploadIcon />}
-              disabled={loading}
-              sx={{ marginBottom: 2 }}
+          <Box
+            role="group"
+            aria-label="Select quality measures"
+            sx={{
+              maxHeight: { xs: 220, sm: 280 },
+              overflowY: "auto",
+              overflowX: "hidden",
+              pr: 0.5,
+              mr: -0.25,
+              scrollbarGutter: "stable",
+              border: "1px solid",
+              borderColor: "divider",
+              borderRadius: 1.5,
+              bgcolor: "background.paper",
+              p: 1,
+            }}
+          >
+            <Box
+              sx={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(92px, 1fr))",
+                columnGap: 0.75,
+                rowGap: 0.35,
+              }}
             >
-              Choose File
-            </Button>
-          </label>
+              {checkboxes.map((num) => (
+                <FormControlLabel
+                  key={num}
+                  control={
+                    <Checkbox
+                      checked={selectedColumns.includes(num)}
+                      onChange={() => handleCheckboxChange(num)}
+                    />
+                  }
+                  label={num}
+                  sx={measureCheckSx}
+                />
+              ))}
+            </Box>
+          </Box>
 
-          {file && (
-            <Typography variant="body1" sx={{ marginBottom: 2 }}>
-              Selected File: {file.name}
-            </Typography>
-          )}
+          <Divider />
+
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={1}
+            alignItems={{ sm: "center" }}
+            flexWrap="wrap"
+            sx={{ minWidth: 0 }}
+          >
+            <input type="file" onChange={handleFileChange} style={{ display: "none" }} id="file-upload" />
+            <label htmlFor="file-upload" style={{ cursor: loading ? "default" : "pointer" }}>
+              <Button variant="contained" component="span" color="primary" size="small" startIcon={<CloudUploadIcon />} disabled={loading}>
+                Choose Excel file
+              </Button>
+            </label>
+            {file && (
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{
+                  fontWeight: 500,
+                  minWidth: 0,
+                  flex: 1,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {file.name}
+              </Typography>
+            )}
+          </Stack>
+
+          <Button
+            variant="contained"
+            color="secondary"
+            size="medium"
+            onClick={handleUpload}
+            disabled={loading}
+            fullWidth
+            sx={{ py: 1.1, fontWeight: 700 }}
+          >
+            {loading ? (
+              <>
+                <CircularProgress size={20} color="inherit" sx={{ mr: 1.5 }} />
+                Processing…
+              </>
+            ) : (
+              "Upload & process"
+            )}
+          </Button>
         </Box>
-
-        <Button
-          variant="contained"
-          color="secondary"
-          onClick={handleUpload}
-          disabled={loading}
-          fullWidth
-          sx={{ padding: "10px 0", fontSize: "16px", fontWeight: "bold" }}
-        >
-          {loading ? (
-            <CircularProgress size={24} sx={{ marginRight: 2 }} />
-          ) : (
-            "Upload"
-          )}
-          {loading && "Processing..."}
-        </Button>
 
         {loading && (
           <Box sx={{ marginTop: 3 }}>
@@ -488,11 +542,8 @@ const Upload = () => {
             {/* Upload progress bar removed as requested */}
 
             {uploadProgress < 100 ? (
-              <Typography
-                variant="body1"
-                sx={{ textAlign: "center", color: "#1976d2", fontWeight: 500, mb: 1 }}
-              >
-                Estimated Time Remaining: {formatTime(timeRemaining)}
+              <Typography variant="body2" sx={{ textAlign: "center", color: "primary.main", fontWeight: 600, mb: 1 }}>
+                Time remaining: {formatTime(timeRemaining)}
               </Typography>
             ) : (
               <>
@@ -504,25 +555,44 @@ const Upload = () => {
                     ETA: {formatTime(procEta)}
                   </Typography>
                 </Box>
-                <Box sx={{ width: '100%', height: 8, backgroundColor: '#e0e0e0', borderRadius: 1, overflow: 'hidden', mb: 2 }}>
-                  <Box sx={{ width: `${Math.max(procPercent, simPercent)}%`, height: '100%', backgroundColor: '#2e7d32', transition: 'width 0.3s ease' }} />
+                <Box
+                  sx={{
+                    width: "100%",
+                    height: 8,
+                    bgcolor: "grey.200",
+                    borderRadius: 1,
+                    overflow: "hidden",
+                    mb: 2,
+                  }}
+                >
+                  <Box
+                    sx={{
+                      width: `${Math.max(procPercent, simPercent)}%`,
+                      height: "100%",
+                      bgcolor: "secondary.main",
+                      transition: "width 0.3s ease",
+                    }}
+                  />
                 </Box>
-                <Typography variant="body1" sx={{ textAlign: 'center', color: '#1976d2', fontWeight: 500, mb: 1 }}>
-                  {procMessage || 'Processing...'}
+                <Typography variant="body2" sx={{ textAlign: "center", color: "primary.main", fontWeight: 600, mb: 1 }}>
+                  {procMessage || "Processing…"}
                 </Typography>
 
-                {/* Live processing log */}
-                <Box sx={{
-                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                  fontSize: 12,
-                  background: '#fafafa',
-                  border: '1px solid #eee',
-                  borderRadius: 1,
-                  maxHeight: 180,
-                  overflowY: 'auto',
-                  p: 1,
-                  mb: 2,
-                }}>
+                <Box
+                  sx={{
+                    fontFamily:
+                      'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                    fontSize: 12,
+                    bgcolor: "grey.50",
+                    border: "1px solid",
+                    borderColor: "divider",
+                    borderRadius: 2,
+                    maxHeight: 200,
+                    overflowY: "auto",
+                    p: 1.5,
+                    mb: 2,
+                  }}
+                >
                   {procLogs.length === 0 ? (
                     <Typography variant="body2" color="text.secondary">Waiting for progress...</Typography>
                   ) : (
@@ -551,30 +621,20 @@ const Upload = () => {
 
       <Snackbar
         open={openSnackbar}
-        autoHideDuration={3000}
+        autoHideDuration={4000}
         onClose={handleCloseSnackbar}
-        anchorOrigin={{ vertical: "top", horizontal: "right" }}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
       >
         <Alert
           onClose={handleCloseSnackbar}
-          severity={String(message).includes("success") ? "success" : "error"}
-          sx={{
-            fontWeight: "bold",
-            fontSize: "16px",
-            padding: "16px 24px",
-            borderRadius: "8px",
-            boxShadow: "0px 4px 12px rgba(0, 0, 0, 0.2)",
-            maxWidth: "400px",
-            backgroundColor: message.includes("success")
-              ? "#388e3c"
-              : "#d32f2f",
-            color: "#fff",
-          }}
+          severity={String(message).toLowerCase().includes("success") ? "success" : "error"}
+          variant="filled"
+          sx={{ minWidth: 280, fontWeight: 600 }}
         >
           {message}
         </Alert>
       </Snackbar>
-    </Box>
+    </PageShell>
   );
 };
 

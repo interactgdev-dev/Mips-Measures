@@ -18,10 +18,12 @@ import {
   CircularProgress,
   Snackbar,
   Alert,
+  Stack,
 } from "@mui/material";
 import DownloadIcon from "@mui/icons-material/Download";
 import DeleteIcon from "@mui/icons-material/Delete";
 import axios from "axios";
+import PageShell from "./PageShell";
 
 const Files = () => {
   const [files, setFiles] = useState([]);
@@ -36,7 +38,7 @@ const Files = () => {
     const fetchFiles = async () => {
       try {
         const response = await axios.get("http://localhost:4700/files");
-        setFiles(response?.data?.files);
+        setFiles(response?.data?.files ?? []);
         setLoading(false);
       } catch (err) {
         setError("Failed to fetch files. Please try again later.");
@@ -107,7 +109,9 @@ const Files = () => {
     setSearchQuery(event.target.value);
   };
 
-  const filteredFiles = files
+  const fileList = Array.isArray(files) ? files : [];
+
+  const filteredFiles = fileList
     .filter((file) =>
       file.name.toLowerCase().includes(searchQuery.toLowerCase())
     )
@@ -120,151 +124,157 @@ const Files = () => {
 
   if (loading) {
     return (
-      <Box sx={{ textAlign: "center", marginTop: "20px" }}>
-        <CircularProgress />
-      </Box>
+      <PageShell maxWidth="lg">
+        <Paper
+          elevation={0}
+          sx={{
+            p: 6,
+            textAlign: "center",
+            borderRadius: 3,
+            border: "1px solid",
+            borderColor: "divider",
+          }}
+        >
+          <CircularProgress sx={{ mb: 2 }} />
+          <Typography variant="body1" color="text.secondary">
+            Loading files…
+          </Typography>
+        </Paper>
+      </PageShell>
     );
   }
 
   if (error) {
     return (
-      <Typography
-        variant="h6"
-        sx={{ textAlign: "center", marginTop: "20px", color: "red" }}
-      >
-        {error}
-      </Typography>
+      <PageShell maxWidth="lg">
+        <Paper
+          elevation={0}
+          sx={{
+            p: 4,
+            borderRadius: 3,
+            border: "1px solid",
+            borderColor: "error.light",
+            bgcolor: "#fff5f5",
+          }}
+        >
+          <Typography variant="h6" color="error.dark">
+            {error}
+          </Typography>
+        </Paper>
+      </PageShell>
     );
   }
 
   return (
-    <Box
-      sx={{
-        maxWidth: "1000px",
-        margin: "20px auto",
-        padding: "30px",
-        backgroundColor: "#f9f9f9",
-        borderRadius: "12px",
-        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.1)",
-      }}
-    >
-      <Typography
-        variant="h4"
-        gutterBottom
-        align="center"
-        sx={{ fontWeight: "bold", color: "#1976d2" }}
-      >
-        Files
-      </Typography>
-      <Box
+    <PageShell maxWidth="lg">
+      <Paper
+        elevation={0}
         sx={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: "16px",
-          marginBottom: "20px",
+          p: { xs: 2, sm: 3 },
+          borderRadius: 3,
+          border: "1px solid",
+          borderColor: "divider",
+          boxShadow: "0 12px 40px rgba(15, 23, 42, 0.06)",
         }}
       >
-        <TextField
-          label="Search Files"
-          variant="outlined"
-          value={searchQuery}
-          onChange={handleSearchChange}
-          sx={{
-            flex: 1,
-            backgroundColor: "#fff",
-            borderRadius: "8px",
-          }}
-        />
-        <FormControl sx={{ flex: 1 }}>
-          <InputLabel>Sort By</InputLabel>
-          <Select
-            value={sortOrder}
-            label="Sort By"
-            onChange={handleSortChange}
-            sx={{
-              backgroundColor: "#fff",
-              borderRadius: "8px",
-            }}
-          >
-            <MenuItem value="asc">Ascending</MenuItem>
-            <MenuItem value="desc">Descending</MenuItem>
-          </Select>
-        </FormControl>
-      </Box>
+        <Stack spacing={0.5} sx={{ mb: 3 }}>
+          <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: "0.12em" }}>
+            Output
+          </Typography>
+          <Typography variant="h4" component="h1" sx={{ color: "primary.main" }}>
+            Processed files
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Download or remove workbooks stored on the server.
+          </Typography>
+        </Stack>
 
-      <TableContainer component={Paper} sx={{ borderRadius: "12px" }}>
-        <Table>
-          <TableHead>
-            <TableRow sx={{ backgroundColor: "#1976d2" }}>
-              <TableCell sx={{ color: "#fff", fontWeight: "bold" }}>
-                File Name
-              </TableCell>
-              <TableCell sx={{ color: "#fff", fontWeight: "bold" }}>
-                Size
-              </TableCell>
-              <TableCell sx={{ color: "#fff", fontWeight: "bold" }}>
-                Date
-              </TableCell>
-              <TableCell sx={{ color: "#fff", fontWeight: "bold" }}>
-                Actions
-              </TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {filteredFiles.map((file) => (
-              <TableRow key={file.id} hover>
-                <TableCell>{file.name}</TableCell>
-                <TableCell>{file.size}</TableCell>
-                <TableCell>{file.lastModified}</TableCell>
-                <TableCell>
-                  <IconButton
-                    color="primary"
-                    onClick={() => handleDownload(file.name)}
-                    sx={{ padding: 1 }}
-                  >
-                    <DownloadIcon />
-                  </IconButton>
-                  <IconButton
-                    color="error"
-                    onClick={() => handleDelete(file.name)}
-                    sx={{ padding: 1 }}
-                  >
-                    <DeleteIcon />
-                  </IconButton>
+        <Box
+          sx={{
+            display: "flex",
+            flexDirection: { xs: "column", sm: "row" },
+            gap: 2,
+            mb: 3,
+          }}
+        >
+          <TextField
+            label="Search"
+            variant="outlined"
+            size="small"
+            value={searchQuery}
+            onChange={handleSearchChange}
+            sx={{ flex: 1, bgcolor: "background.paper" }}
+          />
+          <FormControl size="small" sx={{ minWidth: { xs: "100%", sm: 200 } }}>
+            <InputLabel>Sort</InputLabel>
+            <Select value={sortOrder} label="Sort" onChange={handleSortChange} sx={{ bgcolor: "background.paper" }}>
+              <MenuItem value="asc">Name A–Z</MenuItem>
+              <MenuItem value="desc">Name Z–A</MenuItem>
+            </Select>
+          </FormControl>
+        </Box>
+
+        <TableContainer
+          sx={{
+            borderRadius: 2,
+            border: "1px solid",
+            borderColor: "divider",
+            overflow: "hidden",
+          }}
+        >
+          <Table size="small" stickyHeader>
+            <TableHead>
+              <TableRow>
+                <TableCell sx={{ fontWeight: 700, bgcolor: "primary.main", color: "primary.contrastText" }}>
+                  File name
+                </TableCell>
+                <TableCell sx={{ fontWeight: 700, bgcolor: "primary.main", color: "primary.contrastText" }}>Size</TableCell>
+                <TableCell sx={{ fontWeight: 700, bgcolor: "primary.main", color: "primary.contrastText" }}>Date</TableCell>
+                <TableCell
+                  align="right"
+                  sx={{ fontWeight: 700, bgcolor: "primary.main", color: "primary.contrastText", pr: 2 }}
+                >
+                  Actions
                 </TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
+            </TableHead>
+            <TableBody>
+              {filteredFiles.map((file) => (
+                <TableRow key={file.id} hover sx={{ "&:last-child td": { border: 0 } }}>
+                  <TableCell sx={{ fontWeight: 500 }}>{file.name}</TableCell>
+                  <TableCell>{file.size}</TableCell>
+                  <TableCell>{file.lastModified}</TableCell>
+                  <TableCell align="right">
+                    <IconButton color="primary" onClick={() => handleDownload(file.name)} aria-label="Download">
+                      <DownloadIcon />
+                    </IconButton>
+                    <IconButton color="error" onClick={() => handleDelete(file.name)} aria-label="Delete">
+                      <DeleteIcon />
+                    </IconButton>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Paper>
 
       <Snackbar
         open={openSnackbar}
         autoHideDuration={6000}
         onClose={() => setOpenSnackbar(false)}
-        anchorOrigin={{
-          vertical: "top",
-          horizontal: "right",
-        }}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
       >
         <Alert
           onClose={() => setOpenSnackbar(false)}
           severity={message.includes("Failed") ? "error" : "success"}
-          sx={{
-            fontWeight: "bold",
-            fontSize: "16px",
-            color: "#fff",
-            padding: "16px 24px",
-            borderRadius: "8px",
-            boxShadow: "0px 4px 12px rgba(0, 0, 0, 0.2)",
-            maxWidth: "400px",
-            backgroundColor: message.includes("Failed") ? "#d32f2f" : "#388e3c",
-          }}
+          variant="filled"
+          sx={{ fontWeight: 600 }}
         >
           {message}
         </Alert>
       </Snackbar>
-    </Box>
+    </PageShell>
   );
 };
 

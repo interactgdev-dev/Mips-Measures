@@ -2,8 +2,6 @@ import React, { useState } from "react";
 import {
   Box,
   Typography,
-  TextField,
-  FormGroup,
   FormControlLabel,
   Checkbox,
   Button,
@@ -12,13 +10,16 @@ import {
   Alert,
   Grid,
   Paper,
+  Divider,
+  Stack,
+  InputAdornment,
 } from "@mui/material";
 import { calendarIcon } from "../assets";
 import { LocalizationProvider, DatePicker } from "@mui/x-date-pickers";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
-import { InputAdornment } from "@mui/material";
 import axios from "axios";
+import PageShell from "./PageShell";
 
 const Calculator = () => {
   const [selectedColumns, setSelectedColumns] = useState([]);
@@ -241,17 +242,15 @@ const Calculator = () => {
         setSelectedColumns([]);
         setStartDate(null);
         setEndDate(null);
-        console.log("API Response:", response.data);
       } else {
         setLoading(false);
         setMessage("Processing failed!");
       }
     } catch (error) {
       setLoading(false);
-      console.log("EEEEEEEEEEEEEEror", error);
       setMessage(error.response?.data || "Error processing the data.");
       setOpenSnackbar(true);
-      console.error("Error making API request:", error);
+      console.error("Calculate request failed:", error);
     }
   };
 
@@ -259,179 +258,219 @@ const Calculator = () => {
     setOpenSnackbar(false);
   };
 
+  const measureCheckSx = {
+    m: 0,
+    mx: 0,
+    pr: 0.5,
+    minHeight: 32,
+    alignItems: "center",
+    "& .MuiCheckbox-root": { padding: "6px" },
+    "& .MuiFormControlLabel-label": {
+      fontSize: "0.8125rem",
+      fontWeight: 600,
+      lineHeight: 1.25,
+    },
+  };
+
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs}>
-      <Box sx={{ padding: "20px", maxWidth: "900px", margin: "50px auto" }}>
-        <Paper elevation={3} sx={{ padding: "30px" }}>
-          <Typography
-            variant="h4"
-            gutterBottom
-            align="center"
-            sx={{ fontWeight: "bold", color: "#1976d2" }}
-          >
-            Feedback Report Generators
-          </Typography>
+      <PageShell maxWidth="md">
+        <Paper
+          elevation={0}
+          sx={{
+            p: { xs: 1.5, sm: 2 },
+            borderRadius: 3,
+            border: "1px solid",
+            borderColor: "divider",
+            boxShadow: "0 12px 40px rgba(15, 23, 42, 0.06)",
+          }}
+        >
+          <Stack direction="row" justifyContent="space-between" alignItems="baseline" flexWrap="wrap" gap={1} sx={{ mb: 1.5 }}>
+            <Typography variant="h5" component="h1" sx={{ color: "primary.main", fontWeight: 700 }}>
+              Feedback report
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+              {selectedColumns.length} selected
+            </Typography>
+          </Stack>
+
           <Box
             sx={{
-              maxHeight: "200px",
-              overflowY: "auto",
-              border: "1px solid #ddd",
-              borderRadius: "8px",
-              padding: "10px",
-              mb: 4,
+              border: "1px solid",
+              borderColor: "divider",
+              borderRadius: 2,
+              bgcolor: (theme) => theme.palette.grey[50],
+              p: { xs: 1, sm: 1.25 },
+              display: "flex",
+              flexDirection: "column",
+              gap: 1.25,
             }}
           >
-            <FormGroup row>
-              {checkboxes.map((num) => (
-                <FormControlLabel
-                  key={num}
-                  control={
-                    <Checkbox
-                      checked={selectedColumns.includes(num)}
-                      onChange={() => handleCheckboxChange(num)}
-                      sx={{ color: "#1976d2" }}
-                    />
-                  }
-                  label={
-                    <Typography sx={{ fontSize: "14px" }}>{num}</Typography>
-                  }
-                />
-              ))}
-            </FormGroup>
-          </Box>
-          <Grid container spacing={12} sx={{ mb: 4 }}>
-            <Grid item xs={2} md={6}>
-              <DatePicker
-                label="Select Start Date"
-                value={startDate}
-                onChange={(newValue) => setStartDate(newValue)}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    fullWidth
-                    InputProps={{
-                      ...params.InputProps,
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <img
-                            className="side-bar-icon"
-                            src={calendarIcon}
-                            alt="calendar-icon"
-                          />
-                        </InputAdornment>
-                      ),
-                    }}
-                  />
-                )}
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <DatePicker
-                label="Select End Date"
-                value={endDate}
-                onChange={(newValue) => setEndDate(newValue)}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    fullWidth
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <img
-                            className="side-bar-icon"
-                            src={calendarIcon}
-                            alt="calendar-icon"
-                          />
-                        </InputAdornment>
-                      ),
-                    }}
-                  />
-                )}
-              />
-            </Grid>
-          </Grid>
-          <Box sx={{ textAlign: "center", mb: 4 }}>
-            <input
-              type="file"
-              onChange={handleFileChange}
-              style={{ display: "none" }}
-              id="file-upload"
-            />
-            <label htmlFor="file-upload">
-              <Button
-                variant="contained"
-                component="span"
-                color="primary"
-                startIcon={<CloudUploadIcon />}
-                disabled={loading}
-                sx={{ marginBottom: 2 }}
-              >
-                Choose File
-              </Button>
-            </label>
-
-            {file && (
-              <Typography variant="body1" sx={{ marginBottom: 2 }}>
-                Selected File: {file.name}
-              </Typography>
-            )}
-          </Box>
-          <Button
-            variant="contained"
-            color="secondary"
-            onClick={handleSubmit}
-            disabled={loading}
-            fullWidth
-            sx={{ padding: "10px 0", fontSize: "16px", fontWeight: "bold" }}
-          >
-            {loading ? (
-              <CircularProgress size={24} sx={{ marginRight: 2 }} />
-            ) : (
-              "Submit"
-            )}
-            {loading && "Processing..."}
-          </Button>
-          {loading && (
             <Box
+              role="group"
+              aria-label="Select quality measures and options"
               sx={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                marginTop: 2,
+                maxHeight: { xs: 220, sm: 280 },
+                overflowY: "auto",
+                overflowX: "hidden",
+                pr: 0.5,
+                mr: -0.25,
+                scrollbarGutter: "stable",
+                border: "1px solid",
+                borderColor: "divider",
+                borderRadius: 1.5,
+                bgcolor: "background.paper",
+                p: 1,
               }}
             >
-              <CircularProgress sx={{ marginRight: 2 }} />
-              <Typography variant="body1">{message}</Typography>
+              <Box
+                sx={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(92px, 1fr))",
+                  columnGap: 0.75,
+                  rowGap: 0.35,
+                }}
+              >
+                {checkboxes.map((num) => (
+                  <FormControlLabel
+                    key={num}
+                    control={
+                      <Checkbox
+                        checked={selectedColumns.includes(num)}
+                        onChange={() => handleCheckboxChange(num)}
+                      />
+                    }
+                    label={num}
+                    sx={measureCheckSx}
+                  />
+                ))}
+              </Box>
+            </Box>
+
+            <Divider />
+
+            <Grid container spacing={1}>
+              <Grid item xs={12} sm={6}>
+                <DatePicker
+                  label="Start"
+                  value={startDate}
+                  onChange={(newValue) => setStartDate(newValue)}
+                  slotProps={{
+                    textField: {
+                      size: "small",
+                      fullWidth: true,
+                      InputProps: {
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <img className="side-bar-icon" src={calendarIcon} alt="" />
+                          </InputAdornment>
+                        ),
+                      },
+                    },
+                  }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <DatePicker
+                  label="End"
+                  value={endDate}
+                  onChange={(newValue) => setEndDate(newValue)}
+                  slotProps={{
+                    textField: {
+                      size: "small",
+                      fullWidth: true,
+                      InputProps: {
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <img className="side-bar-icon" src={calendarIcon} alt="" />
+                          </InputAdornment>
+                        ),
+                      },
+                    },
+                  }}
+                />
+              </Grid>
+            </Grid>
+
+            <Divider />
+
+            <Stack
+              direction={{ xs: "column", sm: "row" }}
+              spacing={1}
+              alignItems={{ sm: "center" }}
+              flexWrap="wrap"
+              sx={{ minWidth: 0 }}
+            >
+              <input type="file" onChange={handleFileChange} style={{ display: "none" }} id="file-upload-calc" />
+              <label htmlFor="file-upload-calc" style={{ cursor: loading ? "default" : "pointer" }}>
+                <Button variant="contained" component="span" color="primary" size="small" startIcon={<CloudUploadIcon />} disabled={loading}>
+                  Choose Excel file
+                </Button>
+              </label>
+              {file && (
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{
+                    fontWeight: 500,
+                    minWidth: 0,
+                    flex: 1,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {file.name}
+                </Typography>
+              )}
+            </Stack>
+
+            <Button
+              variant="contained"
+              color="secondary"
+              size="medium"
+              onClick={handleSubmit}
+              disabled={loading}
+              fullWidth
+              sx={{ py: 1.1, fontWeight: 700 }}
+            >
+              {loading ? (
+                <>
+                  <CircularProgress size={20} color="inherit" sx={{ mr: 1.5 }} />
+                  Processing…
+                </>
+              ) : (
+                "Submit"
+              )}
+            </Button>
+          </Box>
+
+          {loading && (
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", mt: 3, gap: 2 }}>
+              <CircularProgress size={28} />
+              <Typography variant="body2" color="text.secondary">
+                {message}
+              </Typography>
             </Box>
           )}
         </Paper>
 
         <Snackbar
           open={openSnackbar}
-          autoHideDuration={3000}
+          autoHideDuration={4000}
           onClose={handleCloseSnackbar}
-          anchorOrigin={{ vertical: "top", horizontal: "right" }}
+          anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
         >
           <Alert
             onClose={handleCloseSnackbar}
             severity={message.includes("success") ? "success" : "error"}
-            sx={{
-              fontWeight: "bold",
-              fontSize: "16px",
-              padding: "16px 24px",
-              borderRadius: "8px",
-              boxShadow: "0px 4px 12px rgba(0, 0, 0, 0.2)",
-              maxWidth: "400px",
-              backgroundColor: message.includes("success")
-                ? "#388e3c"
-                : "#d32f2f",
-              color: "#fff",
-            }}
+            variant="filled"
+            sx={{ minWidth: 280, fontWeight: 600 }}
           >
             {message}
           </Alert>
         </Snackbar>
-      </Box>
+      </PageShell>
     </LocalizationProvider>
   );
 };
