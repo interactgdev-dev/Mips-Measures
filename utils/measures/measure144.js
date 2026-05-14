@@ -1,66 +1,65 @@
+const path = require("path");
 const bulkUpdateRecords = require("./helpers/bulkUpdateRecords");
 
-const CHEMO_ENCOUNTER_CODES = [
-  "98000","98001","98002","98003","98004","98005","98006","98007",
-  "99202","99203","99204","99205","99212","99213","99214","99215",
+/** Legacy logic aligned with utils/processing.js measure144 (explicit ICD list, per-row). */
+const icdCodesToCompare144C1 = require(path.join(__dirname, "data", "measure144IcdC1.json"));
+
+const cpt1CodesToCompare144C1 = [
+  "98000", "98001", "98002", "98003",
+  "98004", "98005", "98006", "98007",
+  "99202", "99203", "99204", "99205",
+  "99212", "99213", "99214", "99215",
 ];
-const CHEMO_PROCEDURE_CODES = [
-  "50391","51720","96401","96405","96406","96409","96413","96416","96420","96422",
-  "96425","96440","96446","96450","96521","96522","96523","96542","96549","G0498",
+const cpt2CodesToCompare144C1 = [
+  "50391", "51720", "96401",
+  "96405", "96406", "96409", "96413", "96416",
+  "96420", "96422", "96425", "96440", "96446",
+  "96450", "96521", "96522", "96523",
+  "96542", "96549", "G0498",
 ];
-const RADIATION_PROCEDURE_CODES = ["77427", "77431", "77432", "77435"];
+const cpt1CodesToCompare144C2 = ["77427", "77431", "77432", "77435"];
 
 const measure144OncologyPlanOfCareForPain = async (collection, records) => {
-  const splitCodes = (value) => String(value || "").trim().split(/\s+/).filter(Boolean);
-  const normalizeCode = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-  const hasCode = (record, code) => {
-    const target = normalizeCode(code);
-    const tokens = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS), ...splitCodes(record.ICD)];
-    return tokens.some((token) => normalizeCode(token) === target);
-  };
-  const hasAnyCode = (record, codeSet, fields = ["CPT", "HCPCS"]) => {
-    const tokens = fields.flatMap((field) => splitCodes(record[field])).map((code) => normalizeCode(code));
-    return tokens.some((code) => codeSet.includes(code));
-  };
-  const isCancerDx = (record) => {
-    const icdTokens = splitCodes(record.ICD).map((code) => normalizeCode(code));
-    return icdTokens.some((code) => {
-      if (code.startsWith("C")) return true;
-      if (/^D(3[7-9]|4[0-9])/.test(code)) return true;
-      return false;
-    });
-  };
+  const updatesByRecord = new WeakMap();
+  for (const record of records) {
+    const icdCodes144C1 = (record.ICD || "").split(" ");
+    const cpt1Codes144C1 = String(record.CPT || "").split(" ");
+    const cpt2Codes144C1 = String(record.CPT || "").split(" ");
+    const cpt1Codes144C2 = String(record.CPT || "").split(" ");
 
-  await bulkUpdateRecords(collection, records, (record) => {
-    const ctPainPresentFromMeasure143 = hasCode(record, "1125F");
-    const ctHasCancerDx = isCancerDx(record);
+    const icdMatched144C1 = icdCodes144C1.filter((code) => icdCodesToCompare144C1.includes(code));
+    const cpt1Matched144C1 = cpt1Codes144C1.filter((code) => cpt1CodesToCompare144C1.includes(code));
+    const cpt2Matched144C1 = cpt2Codes144C1.filter((code) => cpt2CodesToCompare144C1.includes(code));
 
-    // CT1 - Chemotherapy pathway
-    const ct1DenominatorMet =
-      ctPainPresentFromMeasure143 &&
-      ctHasCancerDx &&
-      hasAnyCode(record, CHEMO_ENCOUNTER_CODES) &&
-      (hasAnyCode(record, CHEMO_PROCEDURE_CODES) || hasCode(record, "M1435"));
+    const icdMatched144C2 = icdCodes144C1.filter((code) => icdCodesToCompare144C1.includes(code));
+    const cpt1Matched144C2 = cpt1Codes144C2.filter(
+      (code) =>
+        cpt1CodesToCompare144C2.includes(code) &&
+        (record.MOD !== "GQ" || record.MOD !== "GT") &&
+        (record.POS !== 2 || record.POS !== 10)
+    );
 
-    // CT2 - Radiation pathway
-    const ct2DenominatorMet =
-      ctPainPresentFromMeasure143 &&
-      ctHasCancerDx &&
-      hasAnyCode(record, RADIATION_PROCEDURE_CODES);
+    const m144 =
+      (icdMatched144C1.length > 0 &&
+        cpt1Matched144C1.length > 0 &&
+        cpt2Matched144C1.length > 0) ||
+      (icdMatched144C2.length > 0 && cpt1Matched144C2.length > 0)
+        ? 1
+        : 0;
 
-    const ctDenominatorMet = ct1DenominatorMet || ct2DenominatorMet;
-
-    return {
-      ICD144C1: ct1DenominatorMet ? 1 : 0,
-      CPT144C1: ct1DenominatorMet ? 1 : 0,
-      ICD144C2: ct2DenominatorMet ? 1 : 0,
-      CPT144C2: ct2DenominatorMet ? 1 : 0,
-      M144: ctDenominatorMet ? 1 : 0,
+    updatesByRecord.set(record, {
+      ICD144C1: icdMatched144C1.length > 0 ? 1 : 0,
+      CPT144C1: cpt1Matched144C1.length > 0 && cpt2Matched144C1.length > 0 ? 1 : 0,
+      ICD144C2: icdMatched144C2.length > 0 ? 1 : 0,
+      CPT144C2: cpt1Matched144C2.length > 0 ? 1 : 0,
+      M144: m144,
       N144_MET: 0,
       N144_NOT_MET: 0,
       QDC144: "",
-    };
-  });
+    });
+  }
+
+  await bulkUpdateRecords(collection, records, (record) => updatesByRecord.get(record) || {});
 
   return {
     message: "Measure 144 processed successfully",

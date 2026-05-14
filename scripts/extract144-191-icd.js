@@ -1,0 +1,21 @@
+const fs = require("fs");
+const path = require("path");
+const t = fs.readFileSync(path.join(__dirname, "../utils/processing.js"), "utf8");
+const start = t.indexOf("exports.measure144 = async");
+const end = t.indexOf("exports.measure450", start);
+const block = t.slice(start, end);
+const m = block.match(/const icdCodesToCompare144C1 = \[([\s\S]*?)\];/);
+if (!m) throw new Error("no icd 144");
+const arr = m[1].match(/"[^"]+"/g).map((s) => JSON.parse(s));
+const dataDir = path.join(__dirname, "../utils/measures/data");
+fs.mkdirSync(dataDir, { recursive: true });
+fs.writeFileSync(path.join(dataDir, "measure144IcdC1.json"), JSON.stringify(arr));
+console.log("144 icd count", arr.length);
+
+const start191 = t.indexOf("exports.measure191 = async");
+const block191 = t.slice(start191, start191 + 50000);
+const m191 = block191.match(/const icdCodesToCompare191 = \[([\s\S]*?)\];\s*\n\s*const cptCodesToCompare191/);
+if (!m191) throw new Error("no icd 191");
+const arr191 = m191[1].match(/"[^"]+"/g).map((s) => JSON.parse(s));
+fs.writeFileSync(path.join(dataDir, "measure191LegacyIcd.json"), JSON.stringify(arr191));
+console.log("191 icd count", arr191.length);

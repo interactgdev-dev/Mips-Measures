@@ -22,12 +22,14 @@ const measure176TuberculosisScreeningBiologicTherapy = async (collection, record
     const ct1RecordEncounterCodes = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS)].map((code) => normalizeCode(code));
     const ct1HasEncounter = ct1RecordEncounterCodes.some((code) => denominatorEncounterCodes.includes(code));
     const ct1HasFirstTimeBiologicIndicator = hasCode(record, "G2182");
-    const ct1DenominatorMet = ct1AgeOnEncounterDate >= 18 && ct1HasEncounter && ct1HasFirstTimeBiologicIndicator;
+    // Legacy `processing.js` set M176 whenever qualifying encounter + age matched; G2182 was not required for M176.
+    const ct1EncounterLine = ct1AgeOnEncounterDate >= 18 && ct1HasEncounter;
+    const ct1FullDenominatorPerSpec = ct1EncounterLine && ct1HasFirstTimeBiologicIndicator;
 
     return {
-      CPT176: ct1AgeOnEncounterDate >= 18 && ct1HasEncounter ? 1 : 0,
-      M176: ct1DenominatorMet ? 1 : 0,
-      E176: ct1DenominatorMet ? 1 : 0,
+      CPT176: ct1EncounterLine ? 1 : 0,
+      M176: ct1EncounterLine ? 1 : 0,
+      E176: ct1FullDenominatorPerSpec ? 1 : 0,
       N176_MET: 0,
       N176_EXCEPTION: 0,
       N176_NOT_MET: 0,

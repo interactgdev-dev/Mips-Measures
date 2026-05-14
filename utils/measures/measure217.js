@@ -1,59 +1,54 @@
+const path = require("path");
 const bulkUpdateRecords = require("./helpers/bulkUpdateRecords");
+const cptDenominatorBase2026 = require("./helpers/functionalStatus2026DenominatorCpt");
 
+const icdCodesToCompare217 = require(path.join(__dirname, "data", "measure217LegacyIcd.json"));
+
+/** 2026 MIPS CQM PDF denominator encounter: base CPTs + M1106 + M1426. ICD list from CMS export (dotless). */
+const cptCodesToCompare217 = [...cptDenominatorBase2026, "M1106", "M1426"];
+
+/**
+ * Denominator logic aligned with `processing.js` (per-row, CPT-only modifiers).
+ * CPT encounter list updated to **2026 measure PDF** (adds 980xx + M1426).
+ * `E00217` uses `cpt1Matched217.length` on boolean (legacy quirk → effectively 0).
+ */
 const measure217FunctionalStatusKnee = async (collection, records) => {
-  // CT1 - Initial evaluation encounter codes (CPT or M-code)
-  const ct1EncounterCodes = [
-    "97161", "97162", "97163", "97165", "97166", "97167",
-    "98000", "98001", "98002", "98003", "98004", "98005", "98006", "98007", "98008",
-    "98009", "98010", "98011", "98012", "98013", "98014", "98015", "98016",
-    "99202", "99203", "99204", "99205", "99212", "99213", "99214", "99215",
-    "98940", "98941", "98942", "98943",
-    "99304", "99305", "99306",
-    "M1106", "M1426",
-  ];
-
-  // Knee diagnosis list is very large in CMS spec; this prefix set tracks those listed knee-related ICD families.
-  const ct2KneeDxPrefixes = [
-    "M13", "M17", "M21", "M22", "M23", "M24", "M25", "M65", "M67", "M70", "M71", "M76", "M94", "M97",
-    "S72", "S79", "S80", "S82", "S83", "S84", "S89",
-    "T84", "Z47", "Z89", "Z96",
-  ];
-
-  const splitCodes = (value) => String(value || "").trim().split(/\s+/).filter(Boolean);
-  const normalizeCode = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-  const hasCode = (record, code) => {
-    const target = normalizeCode(code);
-    const tokens = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS), ...splitCodes(record.ICD)];
-    return tokens.some((token) => normalizeCode(token) === target);
-  };
-
   await bulkUpdateRecords(collection, records, (record) => {
-    const ct1AgeOnInitialEvaluation = Number(record.AGE);
-    const ct1EncounterTokens = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS)].map((code) => normalizeCode(code));
-    const ct1HasInitialEncounter = ct1EncounterTokens.some((code) => ct1EncounterCodes.includes(code));
+    const icdCodes217 = (record.ICD || "").split(" ");
+    const cptCodes217 = String(record.CPT || "").split(" ");
 
-    const ct2IcdCodes = splitCodes(record.ICD).map((code) => normalizeCode(code));
-    const ct2HasKneeDx = ct2IcdCodes.some((code) => ct2KneeDxPrefixes.some((prefix) => code.startsWith(prefix)));
+    const icdMatched217 = icdCodes217.filter(
+      (code) => icdCodesToCompare217.includes(code) && record.AGE >= 14
+    );
 
-    // CT3 - Excludes specific denominator exclusion markers.
-    const ct3HasDegenerativeNeuroExclusion = hasCode(record, "M1107");
-    const ct3HasUnableToCompletePromExclusion = hasCode(record, "G9727");
+    const cptMatched217 = cptCodes217.filter(
+      (code) => cptCodesToCompare217.includes(code) && record.AGE >= 14
+    );
 
-    const ct1DenominatorMet =
-      ct1AgeOnInitialEvaluation >= 14 &&
-      ct1HasInitialEncounter &&
-      ct2HasKneeDx &&
-      !ct3HasDegenerativeNeuroExclusion &&
-      !ct3HasUnableToCompletePromExclusion;
+    const cpt1Matched217 = cptCodes217.includes("M1009") && record.AGE >= 14;
+    const cpt2Matched217 = cptCodes217.includes("M1107") && record.AGE >= 14;
+    const cpt3Matched217 = cptCodes217.includes("G9727") && record.AGE >= 14;
+
+    const m217 =
+      icdMatched217.length > 0 &&
+      cptMatched217.length > 0 &&
+      (cpt2Matched217 == false || cpt3Matched217 == false)
+        ? 1
+        : 0;
+
+    const e00217 =
+      icdMatched217.length > 0 &&
+      cptMatched217.length > 0 &&
+      cpt1Matched217.length > 0 &&
+      (cpt2Matched217 == false || cpt3Matched217 == false)
+        ? 1
+        : 0;
 
     return {
-      ICD217: ct2HasKneeDx ? 1 : 0,
-      CPT217: ct1HasInitialEncounter ? 1 : 0,
-      M217: ct1DenominatorMet ? 1 : 0,
-      N217_MET: 0,
-      N217_EXCEPTION: 0,
-      N217_NOT_MET: 0,
-      QDC217: "",
+      ICD217: icdMatched217.length > 0 ? 1 : 0,
+      CPT217: cptMatched217.length > 0 ? 1 : 0,
+      M217: m217,
+      E00217: e00217,
     };
   });
 

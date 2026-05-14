@@ -1,63 +1,53 @@
+const path = require("path");
 const bulkUpdateRecords = require("./helpers/bulkUpdateRecords");
+const cptDenominatorBase2026 = require("./helpers/functionalStatus2026DenominatorCpt");
 
+const icdCodesToCompare219 = require(path.join(__dirname, "data", "measure219LegacyIcd.json"));
+
+/** 2026 MIPS CQM PDF: M1116 + M1426 with shared CPT base. */
+const cptCodesToCompare219 = [...cptDenominatorBase2026, "M1116", "M1426"];
+
+/**
+ * Same row logic as `processing.js` measure219; CPT denominator per **2026 PDF** (+ M1426, 980xx).
+ * `E00219` uses `cpt1Matched219.length` on boolean (legacy quirk → effectively 0).
+ */
 const measure219FunctionalStatusLowerLegFootAnkle = async (collection, records) => {
-  // CT1 - Initial evaluation encounter codes (CPT or M-code)
-  const ct1EncounterCodes = [
-    "97161", "97162", "97163", "97165", "97166", "97167",
-    "98000", "98001", "98002", "98003", "98004", "98005", "98006", "98007", "98008",
-    "98009", "98010", "98011", "98012", "98013", "98014", "98015", "98016",
-    "99202", "99203", "99204", "99205", "99212", "99213", "99214", "99215",
-    "98940", "98941", "98942", "98943",
-    "99304", "99305", "99306",
-    "M1116", "M1426",
-  ];
-
-  // Lower leg/foot/ankle diagnosis list in CMS spec is large; this prefix set tracks listed ICD families.
-  const ct2LowerLegFootAnkleDxPrefixes = [
-    "M13", "M19", "M24", "M25", "M62", "M63", "M66", "M67", "M70", "M72", "M76", "M77", "M79",
-    "M84", "M85", "M89", "M94", "M97",
-    "Q66",
-    "S82", "S86", "S89", "S90", "S92", "S93", "S94", "S96", "S97", "S99",
-    "T84", "Z96",
-  ];
-
-  const splitCodes = (value) => String(value || "").trim().split(/\s+/).filter(Boolean);
-  const normalizeCode = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-  const hasCode = (record, code) => {
-    const target = normalizeCode(code);
-    const tokens = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS), ...splitCodes(record.ICD)];
-    return tokens.some((token) => normalizeCode(token) === target);
-  };
-
   await bulkUpdateRecords(collection, records, (record) => {
-    const ct1AgeOnInitialEvaluation = Number(record.AGE);
-    const ct1EncounterTokens = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS)].map((code) => normalizeCode(code));
-    const ct1HasInitialEncounter = ct1EncounterTokens.some((code) => ct1EncounterCodes.includes(code));
+    const icdCodes219 = (record.ICD || "").split(" ");
+    const cptCodes219 = String(record.CPT || "").split(" ");
 
-    const ct2IcdCodes = splitCodes(record.ICD).map((code) => normalizeCode(code));
-    const ct2HasLowerLegFootAnkleDx = ct2IcdCodes.some((code) =>
-      ct2LowerLegFootAnkleDxPrefixes.some((prefix) => code.startsWith(prefix))
+    const icdMatched219 = icdCodes219.filter(
+      (code) => icdCodesToCompare219.includes(code) && record.AGE >= 14
     );
 
-    // CT3 - Excludes specific denominator exclusion markers.
-    const ct3HasDegenerativeNeuroExclusion = hasCode(record, "M1117");
-    const ct3HasUnableToCompletePromExclusion = hasCode(record, "G9731");
+    const cptMatched219 = cptCodes219.filter(
+      (code) => cptCodesToCompare219.includes(code) && record.AGE >= 14
+    );
 
-    const ct1DenominatorMet =
-      ct1AgeOnInitialEvaluation >= 14 &&
-      ct1HasInitialEncounter &&
-      ct2HasLowerLegFootAnkleDx &&
-      !ct3HasDegenerativeNeuroExclusion &&
-      !ct3HasUnableToCompletePromExclusion;
+    const cpt1Matched219 = cptCodes219.includes("M1011") && record.AGE >= 14;
+    const cpt2Matched219 = cptCodes219.includes("M1117") && record.AGE >= 14;
+    const cpt3Matched219 = cptCodes219.includes("G9731") && record.AGE >= 14;
+
+    const m219 =
+      icdMatched219.length > 0 &&
+      cptMatched219.length > 0 &&
+      (cpt2Matched219 == false || cpt3Matched219 == false)
+        ? 1
+        : 0;
+
+    const e00219 =
+      icdMatched219.length > 0 &&
+      cptMatched219.length > 0 &&
+      cpt1Matched219.length > 0 &&
+      (cpt2Matched219 == false || cpt3Matched219 == false)
+        ? 1
+        : 0;
 
     return {
-      ICD219: ct2HasLowerLegFootAnkleDx ? 1 : 0,
-      CPT219: ct1HasInitialEncounter ? 1 : 0,
-      M219: ct1DenominatorMet ? 1 : 0,
-      N219_MET: 0,
-      N219_EXCEPTION: 0,
-      N219_NOT_MET: 0,
-      QDC219: "",
+      ICD219: icdMatched219.length > 0 ? 1 : 0,
+      CPT219: cptMatched219.length > 0 ? 1 : 0,
+      M219: m219,
+      E00219: e00219,
     };
   });
 

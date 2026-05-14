@@ -179,8 +179,6 @@ app.get("/files", async (req, res) => {
   }
 });
 let functionMapping = {
-  M143: "measure143",
-  M144: "measure144",
   M001: "measure1",
   M005: "measure5",
   M006: "measure6",
@@ -309,6 +307,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
         selectedMeasures = columns.map(c => String(c).trim().toUpperCase()).filter(Boolean);
       }
     }
+    selectedMeasures = [...new Set(selectedMeasures)];
     console.log("Selected measures:", selectedMeasures);
     
     if (!file) return handleError(res, "No file uploaded", 400);
@@ -705,7 +704,7 @@ async function processRecordsInChunks(collection, cursor, columns, onBatchProces
 async function processBatch(collection, batch, batchCount, columns) {
   // ALWAYS run all measure functions to populate Sheet1 with complete data
   // Excel filtering happens later based on selectedMeasures
-  const selectedFunctions = Object.values(functionMapping);
+  const selectedFunctions = [...new Set(Object.values(functionMapping))];
   if (!selectedFunctions.length) {
     return;
   }

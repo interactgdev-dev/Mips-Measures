@@ -1,63 +1,57 @@
+const path = require("path");
 const bulkUpdateRecords = require("./helpers/bulkUpdateRecords");
 
+const icdCodesToCompare222 = require(path.join(__dirname, "data", "measure222LegacyIcd.json"));
+
+const cptCodesToCompare222 = [
+  "97161", "97162", "97163", "97165", "97166", "97167",
+  "99202", "99203", "99204", "99205", "99212", "99213", "99214", "99215",
+  "98940", "98941", "98942", "98943",
+  "99304", "99305", "99306",
+  "M1135",
+];
+
+/**
+ * Legacy-aligned: `processing.js` / `processing - Copy.js` measure222 (per-row, CPT-only for exclusions).
+ * `E0222` uses `cpt1Matched222.length` where `cpt1Matched222` is boolean (legacy quirk → effectively 0).
+ */
 const measure222FunctionalStatusElbowWristHand = async (collection, records) => {
-  // CT1 - Initial evaluation encounter codes (CPT or M-code)
-  const ct1EncounterCodes = [
-    "97161", "97162", "97163", "97165", "97166", "97167",
-    "98000", "98001", "98002", "98003", "98004", "98005", "98006", "98007", "98008",
-    "98009", "98010", "98011", "98012", "98013", "98014", "98015", "98016",
-    "99202", "99203", "99204", "99205", "99212", "99213", "99214", "99215",
-    "98940", "98941", "98942", "98943",
-    "99304", "99305", "99306",
-    "M1135", "M1426",
-  ];
-
-  // Elbow/wrist/hand diagnosis list in CMS spec is large; this prefix set tracks listed ICD families.
-  const ct2ElbowWristHandDxPrefixes = [
-    "M05", "M06", "M08", "M11", "M12", "M13", "M14", "M18", "M19", "M20", "M21", "M24", "M25",
-    "M61", "M62", "M63", "M65", "M66", "M67", "M70", "M71", "M72", "M77", "M79",
-    "M84", "M92", "M93", "M94", "M96", "M97",
-    "S42", "S49", "S50", "S52", "S53", "S56", "S57", "S59", "S60", "S62", "S63", "S66", "S67", "S69",
-    "Z96",
-  ];
-
-  const splitCodes = (value) => String(value || "").trim().split(/\s+/).filter(Boolean);
-  const normalizeCode = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-  const hasCode = (record, code) => {
-    const target = normalizeCode(code);
-    const tokens = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS), ...splitCodes(record.ICD)];
-    return tokens.some((token) => normalizeCode(token) === target);
-  };
-
   await bulkUpdateRecords(collection, records, (record) => {
-    const ct1AgeOnInitialEvaluation = Number(record.AGE);
-    const ct1EncounterTokens = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS)].map((code) => normalizeCode(code));
-    const ct1HasInitialEncounter = ct1EncounterTokens.some((code) => ct1EncounterCodes.includes(code));
+    const icdCodes222 = (record.ICD || "").split(" ");
+    const cptCodes222 = String(record.CPT || "").split(" ");
 
-    const ct2IcdCodes = splitCodes(record.ICD).map((code) => normalizeCode(code));
-    const ct2HasElbowWristHandDx = ct2IcdCodes.some((code) =>
-      ct2ElbowWristHandDxPrefixes.some((prefix) => code.startsWith(prefix))
+    const icdMatched222 = icdCodes222.filter(
+      (code) => icdCodesToCompare222.includes(code) && record.AGE >= 14
     );
 
-    // CT3 - Excludes specific denominator exclusion markers.
-    const ct3HasDegenerativeNeuroExclusion = hasCode(record, "M1131");
-    const ct3HasUnableToCompletePromExclusion = hasCode(record, "G9737");
+    const cptMatched222 = cptCodes222.filter(
+      (code) => cptCodesToCompare222.includes(code) && record.AGE >= 14
+    );
 
-    const ct1DenominatorMet =
-      ct1AgeOnInitialEvaluation >= 14 &&
-      ct1HasInitialEncounter &&
-      ct2HasElbowWristHandDx &&
-      !ct3HasDegenerativeNeuroExclusion &&
-      !ct3HasUnableToCompletePromExclusion;
+    const cpt1Matched222 = cptCodes222.includes("M1014") && record.AGE >= 14;
+    const cpt2Matched222 = cptCodes222.includes("M1131") && record.AGE >= 14;
+    const cpt3Matched222 = cptCodes222.includes("G9737") && record.AGE >= 14;
+
+    const m222 =
+      icdMatched222.length > 0 &&
+      cptMatched222.length > 0 &&
+      (cpt2Matched222 == false || cpt3Matched222 == false)
+        ? 1
+        : 0;
+
+    const e0222 =
+      icdMatched222.length > 0 &&
+      cptMatched222.length > 0 &&
+      cpt1Matched222.length > 0 &&
+      (cpt2Matched222 == false || cpt3Matched222 == false)
+        ? 1
+        : 0;
 
     return {
-      ICD222: ct2HasElbowWristHandDx ? 1 : 0,
-      CPT222: ct1HasInitialEncounter ? 1 : 0,
-      M222: ct1DenominatorMet ? 1 : 0,
-      N222_MET: 0,
-      N222_EXCEPTION: 0,
-      N222_NOT_MET: 0,
-      QDC222: "",
+      ICD222: icdMatched222.length > 0 ? 1 : 0,
+      CPT222: cptMatched222.length > 0 ? 1 : 0,
+      M222: m222,
+      E0222: e0222,
     };
   });
 
