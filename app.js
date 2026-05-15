@@ -7,10 +7,9 @@ const ExcelJS = require("exceljs");
 const debug = require("debug")("app:server");
 const debugError = require("debug")("app:error");
 let limit;
-(async () => {
+const limitReady = (async () => {
   const pLimit = (await import("p-limit")).default;
-  // Keep concurrency moderate to avoid Mongo socket resets under heavy parallel writes.
-  limit = pLimit(15);
+  limit = pLimit(8);
 })();
 
 const csv = require("csv-parser");
@@ -292,7 +291,7 @@ let functionMapping = {
 app.post("/upload", upload.single("file"), async (req, res) => {
   let dbConnection = null;
   try {
-    const { columns, isSelected, jobId: jobIdRaw } = req.body;
+    const { columns, jobId: jobIdRaw } = req.body;
     const jobId = String(jobIdRaw || `${Date.now()}_${Math.random().toString(36).slice(2,8)}`);
     jobMeta.set(jobId, { startAt: Date.now() });
     const file = req.file;
@@ -308,7 +307,14 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       }
     }
     selectedMeasures = [...new Set(selectedMeasures)];
-    console.log("Selected measures:", selectedMeasures);
+    // Sheet1: always run all measures (previous behaviour). M-Records sheets: filter if user selected any.
+    const measuresForSheets =
+      selectedMeasures.length > 0 ? selectedMeasures : Object.keys(functionMapping);
+    if (selectedMeasures.length === 0) {
+      console.log("Selected measures: none — running ALL measures on Sheet1 (previous behaviour)");
+    } else {
+      console.log(`Selected measures (M-Records sheets only): ${selectedMeasures.join(", ")}`);
+    }
     
     if (!file) return handleError(res, "No file uploaded", 400);
     if (path.extname(file.originalname) !== ".xlsx") {
@@ -347,7 +353,10 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     
     // Process and track timing
     const startTime = Date.now();
-    const result = await processUploadedFile(file.path, fileName, columns, res, jobId, selectedMeasures);
+    const result = await processUploadedFile(file.path, fileName, columns, res, jobId, {
+      selectedMeasures,
+      measuresForSheets,
+    });
     if (result?.error) {
       throw result.error;
     }
@@ -379,7 +388,9 @@ app.post("/upload", upload.single("file"), async (req, res) => {
   }
 });
 
-async function processUploadedFile(filePath, fileName, columns, res, jobId = null, selectedMeasures = []) {
+async function processUploadedFile(filePath, fileName, columns, res, jobId = null, measureOpts = {}) {
+  const selectedMeasures = measureOpts.selectedMeasures || [];
+  const measuresForSheets = measureOpts.measuresForSheets || selectedMeasures;
   let dbConnection = null;
   try {
     console.log("Processing uploaded file:", fileName);
@@ -423,12 +434,17 @@ async function processUploadedFile(filePath, fileName, columns, res, jobId = nul
       return Math.round(base + (top - base) * ratio);
     };
 
-    await processRecordsInChunks(collection, collection.find(), columns, async (batchCount) => {
+    await processRecordsInChunks(
+      collection,
+      collection.find(),
+      { jobId, selectedMeasures },
+      async (batchCount) => {
       processedBatches = batchCount;
       // Clamp processedBatches to totalBatches
       const currentBatch = Math.min(processedBatches, totalBatches);
       if (jobId) updateProgress(jobId, { percent: progressForBatches(15, 75), message: `Processing batch ${currentBatch}/${totalBatches}...` });
-    });
+      }
+    );
     
     // For large datasets, skip loading all records into memory; use streaming Excel generation
     const isLarge = totalDocs > 10000;
@@ -450,7 +466,7 @@ async function processUploadedFile(filePath, fileName, columns, res, jobId = nul
 
     if (isLarge) {
       if (jobId) updateProgress(jobId, { percent: 78, message: "Preparing streaming Excel writer..." });
-      await generateExcelFileStreaming(collection, uploadHeaders, recordFields, orig, selectedMeasures, jobId);
+      await generateExcelFileStreaming(collection, uploadHeaders, recordFields, orig, measuresForSheets, jobId);
     } else {
       // Fetch records in memory for small datasets
       if (jobId) updateProgress(jobId, { percent: 75, message: "Fetching processed records..." });
@@ -460,7 +476,7 @@ async function processUploadedFile(filePath, fileName, columns, res, jobId = nul
       if (jobId) updateProgress(jobId, { percent: 78, message: "Preparing data for Excel..." });
 
       if (jobId) updateProgress(jobId, { percent: 80, message: "Aggregating results..." });
-      const { columnCounts, count2Columns, mSheets } = await processExcelData(updateRecords, uploadHeaders, selectedMeasures);
+      const { columnCounts, count2Columns, mSheets } = await processExcelData(updateRecords, uploadHeaders, measuresForSheets);
 
       // Preserve upload column order EXACTLY; use Map to maintain insertion order
       console.log(`📋 Upload headers order: ${uploadHeaders.join(', ')}`);
@@ -529,7 +545,7 @@ async function processUploadedFile(filePath, fileName, columns, res, jobId = nul
       }
 
       if (jobId) updateProgress(jobId, { percent: 90, message: "Generating Excel..." });
-      await generateExcelFile(updateRecords, columnCounts, count2Columns, mSheets, orig, exportOrder, recordFields, selectedMeasures, jobId, database_name);
+      await generateExcelFile(updateRecords, columnCounts, count2Columns, mSheets, orig, exportOrder, recordFields, measuresForSheets, jobId, database_name);
     }
 
     await deleteFileIfExists(filePath);
@@ -634,15 +650,15 @@ async function connectToDatabase(database_name) {
   });
 }
 
-async function processRecordsInChunks(collection, cursor, columns, onBatchProcessed = null) {
+async function processRecordsInChunks(collection, cursor, runContext = null, onBatchProcessed = null) {
   const BATCH_SIZE = 5000;
   let batch = [];
   let batchCount = 0;
-  // Try to get jobId from columns if present (hack: pass as property)
   let jobId = null;
-  if (columns && typeof columns === 'object' && columns.jobId) {
-    jobId = columns.jobId;
-    columns = columns.columns;
+  let selectedMeasures = [];
+  if (runContext && typeof runContext === "object") {
+    jobId = runContext.jobId || null;
+    selectedMeasures = runContext.selectedMeasures || [];
   }
   // OPTIMIZED: Count using countDocuments instead of iterating twice
   let totalDocs = 0;
@@ -667,7 +683,7 @@ async function processRecordsInChunks(collection, cursor, columns, onBatchProces
     if (batch.length === BATCH_SIZE) {
       batchCount++;
       const batchStartTime = Date.now();
-      await processBatch(collection, batch, batchCount, columns);
+      await processBatch(collection, batch, batchCount);
       const batchTime = ((Date.now() - batchStartTime) / 1000).toFixed(1);
       console.log(`⚡ Batch ${batchCount}/${Math.ceil(totalDocs / BATCH_SIZE)} completed in ${batchTime}s (${processedDocs}/${totalDocs} records)`);
       
@@ -687,7 +703,7 @@ async function processRecordsInChunks(collection, cursor, columns, onBatchProces
   if (batch.length > 0) {
     batchCount++;
     const batchStartTime = Date.now();
-    await processBatch(collection, batch, batchCount, columns);
+    await processBatch(collection, batch, batchCount);
     const batchTime = ((Date.now() - batchStartTime) / 1000).toFixed(1);
     console.log(`⚡ Batch ${batchCount}/${Math.ceil(totalDocs / BATCH_SIZE)} completed in ${batchTime}s (${processedDocs}/${totalDocs} records)`);
     
@@ -701,30 +717,45 @@ async function processRecordsInChunks(collection, cursor, columns, onBatchProces
   console.log(`✅ All ${totalDocs} records processed in ${batchCount} batches`);
 }
 
-async function processBatch(collection, batch, batchCount, columns) {
-  // ALWAYS run all measure functions to populate Sheet1 with complete data
-  // Excel filtering happens later based on selectedMeasures
-  const selectedFunctions = [...new Set(Object.values(functionMapping))];
+async function processBatch(collection, batch, batchCount) {
+  await limitReady;
+  if (typeof limit !== "function") {
+    throw new Error("Concurrency limiter not initialized");
+  }
+
+  // Previous behaviour: always run every mapped measure so Sheet1 gets all M/CPT/ICD columns.
+  const selectedFunctions = [...new Set(Object.values(functionMapping))].filter(
+    (fn) => typeof Measures[fn] === "function"
+  );
+
   if (!selectedFunctions.length) {
     return;
   }
-  const runAllMeasures = async () =>
+
+  if (batchCount === 1) {
+    console.log(`▶️  Running ${selectedFunctions.length} measure(s) per batch (all mapped measures)`);
+  }
+
+  const runMeasures = async () =>
     Promise.all(
-      selectedFunctions.map((funcName) => {
-        if (typeof Measures[funcName] === "function") {
-          return limit(() => Measures[funcName](collection, batch));
-        }
-      })
+      selectedFunctions.map((funcName) =>
+        limit(() =>
+          Measures[funcName](collection, batch).catch((err) => {
+            console.error(`Measure ${funcName} failed (batch ${batchCount}):`, err.message);
+          })
+        )
+      )
     );
+
   try {
-    await runAllMeasures();
+    await runMeasures();
   } catch (err) {
     const transient = ["ECONNRESET", "ETIMEDOUT", "MongoNetworkError", "PoolClearedError"].some((token) =>
       String(err?.code || err?.name || err?.message || "").includes(token)
     );
     if (transient) {
       console.warn(`Batch ${batchCount} transient DB error, retrying once: ${err.message}`);
-      await runAllMeasures();
+      await runMeasures();
       return;
     }
     throw err;
@@ -1155,6 +1186,38 @@ async function generateExcelFileStreaming(collection, uploadHeaders, recordField
     const sheet1 = workbook.addWorksheet('Sheet1');
     sheet1.addRow(exportOrder).commit();
 
+    // Counts / Count2 immediately after Sheet1 (not at end after M-Records sheets)
+    const countsWs = workbook.addWorksheet('Counts');
+    countsWs.addRow(['Column', 'Count']).commit();
+    const sortedCounts = Object.entries(columnCounts).sort((a, b) => {
+      const getNum = (str) => {
+        const match = str.match(/^M(\d+)$/i);
+        return match ? parseInt(match[1], 10) : 0;
+      };
+      return getNum(a[0]) - getNum(b[0]);
+    });
+    for (const [k, v] of sortedCounts) {
+      countsWs.addRow([k, v]).commit();
+    }
+
+    if (Object.keys(count2Columns).length > 0) {
+      const count2Ws = workbook.addWorksheet('Count2');
+      count2Ws.addRow(['Column', 'Count']).commit();
+      const sortedCount2 = Object.entries(count2Columns).sort((a, b) => {
+        const getNum = (str) => {
+          const match = str.match(/\d+/);
+          return match ? parseInt(match[0], 10) : 0;
+        };
+        const numA = getNum(a[0]);
+        const numB = getNum(b[0]);
+        if (numA === numB) return a[0].localeCompare(b[0]);
+        return numA - numB;
+      });
+      for (const [k, v] of sortedCount2) {
+        count2Ws.addRow([k, v]).commit();
+      }
+    }
+
     // Optional M-Records sheets (only if measures selected)
     // Don't create sheets upfront - create them lazily when first record is found
     const measureSheets = {};
@@ -1211,42 +1274,6 @@ async function generateExcelFileStreaming(collection, uploadHeaders, recordField
       const createdCount = Object.keys(measureSheets).length;
       const skippedMeasures = selectedMeasures.filter(m => !measureSheets[m]);
       console.log(`📊 [Stream] Created ${createdCount} M-Records sheets (skipped ${skippedMeasures.length} empty: ${skippedMeasures.join(', ')})`);
-    }
-
-    // Counts sheet
-    const countsWs = workbook.addWorksheet('Counts');
-    countsWs.addRow(['Column', 'Count']).commit();
-    // Sort M columns numerically before adding rows
-    const sortedCounts = Object.entries(columnCounts).sort((a, b) => {
-      // Extract number: M007 -> 7, M0019 -> 19, M00118 -> 118
-      const getNum = (str) => {
-        const match = str.match(/^M(\d+)$/i);
-        return match ? parseInt(match[1], 10) : 0;
-      };
-      return getNum(a[0]) - getNum(b[0]);
-    });
-    for (const [k, v] of sortedCounts) {
-      countsWs.addRow([k, v]).commit();
-    }
-
-    // Count2 sheet
-    if (Object.keys(count2Columns).length > 0) {
-      const count2Ws = workbook.addWorksheet('Count2');
-      count2Ws.addRow(['Column', 'Count']).commit();
-      // Sort IC/CP columns numerically before adding rows
-      const sortedCount2 = Object.entries(count2Columns).sort((a, b) => {
-        const getNum = (str) => {
-          const match = str.match(/\d+/);
-          return match ? parseInt(match[0]) : 0;
-        };
-        const numA = getNum(a[0]);
-        const numB = getNum(b[0]);
-        if (numA === numB) return a[0].localeCompare(b[0]);
-        return numA - numB;
-      });
-      for (const [k, v] of sortedCount2) {
-        count2Ws.addRow([k, v]).commit();
-      }
     }
 
     await workbook.commit();
@@ -1519,8 +1546,22 @@ function extractQualityIdNumber(qualityId) {
 }
 
 const PORT = process.env.PORT || 4700;
-const server = app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
-});
-// Disable server timeout (no timeout for long uploads/processing)
-server.setTimeout(0);
+limitReady
+  .then(() => {
+    const server = app.listen(PORT, () => {
+      console.log(`Server is running on http://localhost:${PORT}`);
+    });
+    server.on("error", (err) => {
+      if (err.code === "EADDRINUSE") {
+        console.error(`Port ${PORT} is in use. Stop the other node process, then npm start again.`);
+      } else {
+        console.error("Server error:", err.message);
+      }
+      process.exit(1);
+    });
+    server.setTimeout(0);
+  })
+  .catch((err) => {
+    console.error("Failed to start server:", err.message);
+    process.exit(1);
+  });

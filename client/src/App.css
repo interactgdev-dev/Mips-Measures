@@ -1,0 +1,8 @@
+/* Routed app: full-width shell (layout lives in MUI + PageShell). */
+#root {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  text-align: initial;
+}

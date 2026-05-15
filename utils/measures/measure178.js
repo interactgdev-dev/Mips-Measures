@@ -1,40 +1,105 @@
+const path = require("path");
 const bulkUpdateRecords = require("./helpers/bulkUpdateRecords");
 
-const measure178RheumatoidArthritisFunctionalStatus = async (collection, records) => {
-  // CT1 - Denominator encounter codes (2026 MIPS CQM spec — same family as measure 176)
-  const ct1EncounterCodes = [
-    "98000", "98001", "98002", "98003", "98004", "98005", "98006", "98007",
-    "98008", "98009", "98010", "98011", "98012", "98013", "98014", "98015", "98016",
-    "99202", "99203", "99204", "99205", "99212", "99213", "99214", "99215",
-    "99341", "99342", "99344", "99345", "99347", "99348", "99349", "99350",
-    "99424", "99426", "G0402", "G0468",
-  ];
+/** Legacy RA ICD list — utils/processing.js (211 codes). */
+const raIcdCodes = new Set(require(path.join(__dirname, "data", "measure178LegacyIcd.json")));
 
+/** Legacy denominator CPT — processing.js (no telehealth 980xx). */
+const cptCodesToCompare178 = [
+  "99202", "99203", "99204", "99205", "99212", "99213", "99214", "99215",
+  "99341", "99342", "99344", "99345", "99347", "99348", "99349", "99350",
+  "99424", "99426", "G0402", "G0468",
+];
+
+/**
+ * M178 RA functional status — processing.js / Copy row logic:
+ * same row age ≥18 + RA ICD + qualifying CPT (CPT column only); M178 only on those rows.
+ */
+const measure178RheumatoidArthritisFunctionalStatus = async (collection, records) => {
+  const getPatientKey = (record) => {
+    const raw =
+      record["PAT ID"] ??
+      record["PATID"] ??
+      record["PATIENT ID"] ??
+      record["Patient ID"] ??
+      record["MRN"] ??
+      record["MEMBER ID"] ??
+      record["Member ID"] ??
+      record["PATIENT"];
+    return raw === undefined || raw === null || String(raw).trim() === ""
+      ? String(record._id)
+      : String(raw).trim();
+  };
   const splitCodes = (value) => String(value || "").trim().split(/\s+/).filter(Boolean);
   const normalizeCode = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-  const hasRheumatoidArthritisDx = (record) => {
-    const icdTokens = splitCodes(record.ICD).map((code) => normalizeCode(code));
-    return icdTokens.some((code) => code.startsWith("M05") || code.startsWith("M06"));
+
+  const hasCode = (record, code) => {
+    const target = normalizeCode(code);
+    const tokens = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS), ...splitCodes(record.ICD)];
+    return tokens.some((token) => normalizeCode(token) === target);
   };
 
-  await bulkUpdateRecords(collection, records, (record) => {
-    const ct1AgeOnEncounterDate = Number(record.AGE);
-    const ct1RecordEncounterCodes = [...splitCodes(record.CPT), ...splitCodes(record.HCPCS)].map((code) =>
-      normalizeCode(code)
+  const getQdcStatus = (record) => {
+    if (hasCode(record, "1170F") && !splitCodes(record.MOD).map(normalizeCode).includes("8P")) {
+      return { qdc: "1170F", met: 1, notMet: 0 };
+    }
+    if (hasCode(record, "1170F8P")) return { qdc: "1170F-8P", met: 0, notMet: 1 };
+    const mods = splitCodes(record.MOD).map((m) => normalizeCode(m));
+    if (mods.includes("8P") && hasCode(record, "1170F")) {
+      return { qdc: "1170F-8P", met: 0, notMet: 1 };
+    }
+    return null;
+  };
+
+  const encounterNorm = cptCodesToCompare178.map((code) => normalizeCode(code));
+  const patientQdc = new Map();
+  const rowState = new WeakMap();
+
+  for (const record of records) {
+    const age = Number(record.AGE);
+    const icdTokens = splitCodes(record.ICD);
+    const cptTokens = splitCodes(record.CPT);
+
+    const icdMatched = icdTokens.filter(
+      (code) => raIcdCodes.has(normalizeCode(code)) && age >= 18
     );
-    const ct1HasEncounter = ct1RecordEncounterCodes.some((code) => ct1EncounterCodes.includes(code));
-    const ct1HasRaDx = hasRheumatoidArthritisDx(record);
-    // Row-level denominator like legacy `processing.js`: RA dx + qualifying encounter + age,
-    // without requiring MIPS QDC M1375 (rarely present in flat extracts).
-    const ct1DenominatorMet = ct1AgeOnEncounterDate >= 18 && ct1HasRaDx && ct1HasEncounter;
+    const cptMatched = cptTokens.filter(
+      (code) => encounterNorm.includes(normalizeCode(code)) && age >= 18
+    );
+    const denominator = icdMatched.length > 0 && cptMatched.length > 0;
+
+    rowState.set(record, {
+      icdFlag: icdMatched.length > 0 ? 1 : 0,
+      cptFlag: cptMatched.length > 0 ? 1 : 0,
+      denominator: denominator ? 1 : 0,
+    });
+
+    if (denominator) {
+      const qdcStatus = getQdcStatus(record);
+      if (qdcStatus) {
+        const patientKey = getPatientKey(record);
+        const existing = patientQdc.get(patientKey);
+        if (!existing || (existing.met === 0 && qdcStatus.met === 1)) {
+          patientQdc.set(patientKey, qdcStatus);
+        }
+      }
+    }
+  }
+
+  await bulkUpdateRecords(collection, records, (record) => {
+    const row = rowState.get(record);
+    if (!row) return {};
+
+    const qdc = row.denominator ? patientQdc.get(getPatientKey(record)) : null;
+    const hasNumerator = row.denominator && qdc;
 
     return {
-      ICD178: ct1DenominatorMet ? 1 : 0,
-      CPT178: ct1DenominatorMet ? 1 : 0,
-      M178: ct1DenominatorMet ? 1 : 0,
-      N178_MET: 0,
-      N178_NOT_MET: 0,
-      QDC178: "",
+      ICD178: row.icdFlag,
+      CPT178: row.cptFlag,
+      M178: row.denominator,
+      N178_MET: hasNumerator ? qdc.met : 0,
+      N178_NOT_MET: hasNumerator ? qdc.notMet : 0,
+      QDC178: hasNumerator ? qdc.qdc : "",
     };
   });
 
